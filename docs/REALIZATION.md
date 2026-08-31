@@ -5,7 +5,9 @@
 **Бэкенд:** Go 1.27  
 **Фронтенд:** Next.js (TypeScript)  
 **База данных:** PostgreSQL 16 + Redis  
-**Деплой:** Docker Compose → Kubernetes  
+**Ingress:** Nginx Proxy Manager (контейнер)  
+**Деплой:** Docker Compose / LXC → Kubernetes  
+**Принцип:** всё работает в контейнерах, никакой установки ПО на хост VPS.
 
 ---
 
@@ -22,7 +24,7 @@
 │         │                │                │                           │
 │         └────────────────┴────────────────┘                           │
 │                          │                                             │
-│                    Caddy / Ingress                                     │
+│           Nginx Proxy Manager (контейнер)                              │
 │                          │                                             │
 │         ◄────────────────┘──── исходящие HTTPS-соединения от нод       │
 └──────────────┬─────────────────────────────────────────────────────────┘
@@ -48,18 +50,18 @@
 ## Подтверждённый стек
 
 ```text
-Control Plane (VPS 1):
+Control Plane (VPS 1) — всё в Docker:
   - Go 1.27 (Panel API)
   - Next.js 14/15 (Admin UI + User UI)
   - PostgreSQL 16
   - Redis 7
-  - Caddy (ingress + TLS)
+  - Nginx Proxy Manager (ingress + Let's Encrypt)
   - golang-migrate
 
-VPN Node (VPS 2+):
+VPN Node (VPS 2+) — всё в Docker:
   - node-agent (Go, контейнер)
   - XRay-core (VLESS + REALITY)
-  - decoy-site (nginx)
+  - decoy-site (nginx, контейнер)
 
 Auth:
   - Email + password (Argon2id + JWT)
@@ -67,7 +69,7 @@ Auth:
   - Telegram Login Widget
 
 Deployment:
-  - Docker Compose (сейчас)
+  - Docker Compose или LXC (сейчас)
   - Helm / Kubernetes (потом)
 ```
 
@@ -81,10 +83,11 @@ Deployment:
 
 - [x] Подключение к PostgreSQL и Redis.
 - [x] Базовая авторизация email/password (Argon2id + JWT).
-- [ ] Переписать `docs/REALIZATION.md`.
-- [ ] Разделить `docker-compose` на `control` и `vpn`.
-- [ ] Обновить миграции: таблица `nodes`, поля OAuth/Telegram в `users`.
-- [ ] Обновить `Config` под два режима: `panel` и `agent`.
+- [x] Переписать `docs/REALIZATION.md`.
+- [x] Разделить `docker-compose` на `control` и `vpn`.
+- [x] Обновить миграции: таблица `nodes`, поля OAuth/Telegram в `users`.
+- [x] Обновить `Config` под два режима: `panel` и `agent`.
+- [x] Nginx Proxy Manager вместо Caddy.
 
 **Критерий готовности:** `docker compose -f deploy/docker-compose.control.yml up` поднимает панель с БД; `docker compose -f deploy/docker-compose.vpn.yml up` поднимает агента и XRay.
 
@@ -107,11 +110,12 @@ Deployment:
 
 Цель: админ добавляет VPN-ноды, агенты подключаются автоматически.
 
-- [ ] API админа: `POST /api/v1/nodes`, `GET /api/v1/nodes`, `DELETE /api/v1/nodes/:id`.
-- [ ] Генерация `enroll-token` и `api-token` для ноды.
-- [ ] WebSocket endpoint `/api/v1/nodes/stream` для агентов.
-- [ ] node-agent подключается к панели и регистрируется.
-- [ ] Панель видит статус ноды (online/offline).
+- [x] API админа: `POST /api/v1/nodes`, `GET /api/v1/nodes`, `DELETE /api/v1/nodes/:id`.
+- [x] Генерация `enroll-token` для ноды.
+- [x] WebSocket endpoint `/api/v1/nodes/stream` для агентов.
+- [x] node-agent подключается к панели и регистрируется.
+- [x] Панель видит статус ноды (online/offline).
+- [ ] Генерация и отправка XRay конфига через WebSocket.
 
 **Критерий готовности:** админ создаёт ноду в панели, запускает `docker compose` на VPN-VPS, нода появляется онлайн.
 
@@ -208,10 +212,10 @@ vpn/
 │   ├── admin/                  # Admin UI
 │   └── user/                   # User UI
 ├── deploy/
-│   ├── docker-compose.control.yml
-│   ├── docker-compose.vpn.yml
-│   ├── helm/
-│   └── caddy/
+│   ├── docker-compose.control.yml   # VPS 1: panel + DB + NPM
+│   ├── docker-compose.vpn.yml       # VPS 2+: agent + XRay + decoy
+│   ├── helm/                        # future K8s
+│   └── npm/                         # примеры конфигурации NPM
 ├── decoy-site/
 └── docs/
     └── REALIZATION.md
@@ -221,12 +225,13 @@ vpn/
 
 ## Безопасность
 
-- Panel API только по HTTPS, домен + Let's Encrypt.
+- Panel API только по HTTPS, домен + Let's Encrypt через Nginx Proxy Manager.
 - node-agent подключается к панели исходящим HTTPS/WebSocket.
 - XRay gRPC API слушает только `127.0.0.1` внутри VPN-ноды.
 - Firewall VPN-VPS: только 22/TCP (SSH с ключом), 443/TCP, 443/UDP.
 - OAuth/Telegram проверяются на backend.
 - Секреты в `.env` / Docker secrets, не в git.
+- Все сервисы запущены в контейнерах, на хосте только Docker.
 
 ---
 

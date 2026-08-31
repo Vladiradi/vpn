@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/vpn-project/backend/internal/agentstream"
 	"github.com/vpn-project/backend/internal/auth"
 	"github.com/vpn-project/backend/internal/config"
 	"github.com/vpn-project/backend/internal/middleware"
@@ -15,23 +16,25 @@ import (
 
 // Server is the HTTP application server.
 type Server struct {
-	cfg          *config.Config
-	storage      *storage.Storage
-	authHandler  *auth.Handler
-	nodeHandler  *nodes.Handler
-	authMW       func(http.Handler) http.Handler
-	mux          *http.ServeMux
+	cfg            *config.Config
+	storage        *storage.Storage
+	authHandler    *auth.Handler
+	nodeHandler    *nodes.Handler
+	agentWSHandler *agentstream.Handler
+	authMW         func(http.Handler) http.Handler
+	mux            *http.ServeMux
 }
 
 // New creates a new Server instance with configured routes.
-func New(cfg *config.Config, st *storage.Storage, userRepo *users.Repository, nodeRepo *nodes.Repository, tokenService *auth.TokenService) *Server {
+func New(cfg *config.Config, st *storage.Storage, userRepo *users.Repository, nodeRepo *nodes.Repository, tokenService *auth.TokenService, agentWS *agentstream.Handler) *Server {
 	s := &Server{
-		cfg:         cfg,
-		storage:     st,
-		authHandler: auth.NewHandler(userRepo, tokenService),
-		nodeHandler: nodes.NewHandler(nodeRepo),
-		authMW:      middleware.Auth(tokenService),
-		mux:         http.NewServeMux(),
+		cfg:            cfg,
+		storage:        st,
+		authHandler:    auth.NewHandler(userRepo, tokenService),
+		nodeHandler:    nodes.NewHandler(nodeRepo),
+		agentWSHandler: agentWS,
+		authMW:         middleware.Auth(tokenService),
+		mux:            http.NewServeMux(),
 	}
 	s.routes()
 	return s
@@ -45,6 +48,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/v1/auth/register", s.authHandler.Register)
 	s.mux.HandleFunc("/api/v1/auth/login", s.authHandler.Login)
 
+	// Agent websocket endpoint (authenticated by node token, not JWT)
+	s.mux.Handle("/api/v1/nodes/stream", s.agentWSHandler)
+
 	// Admin-only routes: authMW runs first (sets user context), then AdminOnly checks role.
 	adminDashboard := s.authMW(middleware.AdminOnly(http.HandlerFunc(s.handleAdminDashboard)))
 	s.mux.Handle("/api/v1/admin/dashboard", adminDashboard)
@@ -54,7 +60,7 @@ func (s *Server) routes() {
 	s.mux.Handle("/api/v1/nodes", nodesHandler)
 
 	nodeByIDHandler := s.authMW(middleware.AdminOnly(http.HandlerFunc(s.handleNodeByID)))
-	s.mux.Handle("/api/v1/nodes/", nodeByIDHandler)
+	s.mux.Handle("/api/v1/nodes/{id}", nodeByIDHandler)
 }
 
 func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {

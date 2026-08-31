@@ -1,3 +1,15 @@
+# Control Plane (VPS 1)
+# Everything runs in containers. No software is installed on the host.
+#
+# Services:
+#   - panel-api: Go backend
+#   - postgres:  PostgreSQL database
+#   - redis:     Redis cache/sessions
+#   - npm:       Nginx Proxy Manager (public ingress + Let's Encrypt)
+#
+# In production expose only Nginx Proxy Manager ports (80, 443, 81).
+# Port 8080 for panel-api is exposed only for local development/testing.
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -8,30 +20,35 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U vpn -d vpn"]
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - net-internal
 
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
+    networks:
+      - net-internal
 
-  panel:
+  panel-api:
     build:
       context: ../backend
       dockerfile: Dockerfile
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
+      API_MODE: panel
       PORT: "8080"
       DATABASE_URL: "postgres://vpn:vpn@postgres:5432/vpn?sslmode=disable"
       REDIS_URL: "redis://redis:6379"
@@ -43,6 +60,29 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - net-internal
+
+  npm:
+    image: jc21/nginx-proxy-manager:latest
+    ports:
+      - "80:80"
+      - "443:443"
+      - "81:81"
+    volumes:
+      - npm_data:/data
+      - npm_letsencrypt:/etc/letsencrypt
+    environment:
+      DB_SQLITE_FILE: "/data/database.sqlite"
+    restart: unless-stopped
+    networks:
+      - net-internal
 
 volumes:
   pgdata:
+  npm_data:
+  npm_letsencrypt:
+
+networks:
+  net-internal:
+    driver: bridge

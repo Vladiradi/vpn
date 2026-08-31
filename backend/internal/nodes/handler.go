@@ -3,6 +3,7 @@ package nodes
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 )
 
@@ -43,6 +44,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 	node, enrollToken, err := h.repo.Create(r.Context(), req.Name, req.Hostname, req.PublicIP)
 	if err != nil {
+		log.Printf("create node error: %v", err)
 		respondError(w, http.StatusInternalServerError, "failed to create node")
 		return
 	}
@@ -64,6 +66,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 	nodes, err := h.repo.List(r.Context())
 	if err != nil {
+		log.Printf("list nodes error: %v", err)
 		respondError(w, http.StatusInternalServerError, "failed to list nodes")
 		return
 	}

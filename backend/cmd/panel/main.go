@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/vpn-project/backend/internal/agentstream"
 	"github.com/vpn-project/backend/internal/auth"
 	"github.com/vpn-project/backend/internal/config"
 	"github.com/vpn-project/backend/internal/nodes"
@@ -33,7 +34,10 @@ func main() {
 	nodeRepo := nodes.NewRepository(st.Postgres.Pool)
 	tokenService := auth.NewTokenService(cfg.JWTSecret)
 
-	srv := server.New(cfg, st, userRepo, nodeRepo, tokenService)
+	hub := agentstream.NewHub()
+	agentWS := agentstream.NewHandler(hub, nodeRepo)
+
+	srv := server.New(cfg, st, userRepo, nodeRepo, tokenService, agentWS)
 
 	port := cfg.Port
 	if port == "" {

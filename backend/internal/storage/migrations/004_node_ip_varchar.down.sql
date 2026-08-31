@@ -1,0 +1,1 @@
+ALTER TABLE nodes ALTER COLUMN ip TYPE INET USING ip::inet;

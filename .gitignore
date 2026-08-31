@@ -32,6 +32,9 @@ Thumbs.db
 /dist/
 /panel
 /agent
+/backend/panel
+/backend/agent
+/backend/bin/
 
 # Logs
 *.log

@@ -8,6 +8,7 @@ import (
 	"github.com/vpn-project/backend/internal/auth"
 	"github.com/vpn-project/backend/internal/config"
 	"github.com/vpn-project/backend/internal/middleware"
+	"github.com/vpn-project/backend/internal/nodes"
 	"github.com/vpn-project/backend/internal/storage"
 	"github.com/vpn-project/backend/internal/users"
 )
@@ -17,16 +18,18 @@ type Server struct {
 	cfg          *config.Config
 	storage      *storage.Storage
 	authHandler  *auth.Handler
+	nodeHandler  *nodes.Handler
 	authMW       func(http.Handler) http.Handler
 	mux          *http.ServeMux
 }
 
 // New creates a new Server instance with configured routes.
-func New(cfg *config.Config, st *storage.Storage, userRepo *users.Repository, tokenService *auth.TokenService) *Server {
+func New(cfg *config.Config, st *storage.Storage, userRepo *users.Repository, nodeRepo *nodes.Repository, tokenService *auth.TokenService) *Server {
 	s := &Server{
 		cfg:         cfg,
 		storage:     st,
 		authHandler: auth.NewHandler(userRepo, tokenService),
+		nodeHandler: nodes.NewHandler(nodeRepo),
 		authMW:      middleware.Auth(tokenService),
 		mux:         http.NewServeMux(),
 	}
@@ -42,8 +45,38 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/v1/auth/register", s.authHandler.Register)
 	s.mux.HandleFunc("/api/v1/auth/login", s.authHandler.Login)
 
-	// Protected admin endpoint example
-	s.mux.Handle("/api/v1/admin/dashboard", s.authMW(middleware.AdminOnly(http.HandlerFunc(s.handleAdminDashboard))))
+	// Admin-only routes: authMW runs first (sets user context), then AdminOnly checks role.
+	adminDashboard := s.authMW(middleware.AdminOnly(http.HandlerFunc(s.handleAdminDashboard)))
+	s.mux.Handle("/api/v1/admin/dashboard", adminDashboard)
+
+	// Node management (admin only)
+	nodesHandler := s.authMW(middleware.AdminOnly(http.HandlerFunc(s.handleNodes)))
+	s.mux.Handle("/api/v1/nodes", nodesHandler)
+
+	nodeByIDHandler := s.authMW(middleware.AdminOnly(http.HandlerFunc(s.handleNodeByID)))
+	s.mux.Handle("/api/v1/nodes/", nodeByIDHandler)
+}
+
+func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.nodeHandler.List(w, r)
+	case http.MethodPost:
+		s.nodeHandler.Create(w, r)
+	default:
+		respondError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (s *Server) handleNodeByID(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.nodeHandler.Get(w, r)
+	case http.MethodDelete:
+		s.nodeHandler.Delete(w, r)
+	default:
+		respondError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -84,4 +117,8 @@ func respondJSON(w http.ResponseWriter, status int, payload any) {
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+func respondError(w http.ResponseWriter, status int, message string) {
+	respondJSON(w, status, map[string]string{"error": message})
 }

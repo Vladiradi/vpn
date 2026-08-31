@@ -7,17 +7,32 @@ import (
 	"github.com/caarlos0/env/v11"
 )
 
-// Config holds all configuration for the application.
+// Config holds all application configuration loaded from environment variables.
 type Config struct {
-	Port        string `env:"PORT" envDefault:"8080"`
+	APIMode  string `env:"API_MODE" envDefault:"panel"` // "panel" or "agent"
+	Port     string `env:"PORT" envDefault:"8080"`
+	LogLevel string `env:"LOG_LEVEL" envDefault:"info"`
+
+	// Database / cache (panel only)
 	DatabaseURL string `env:"DATABASE_URL" envDefault:"postgres://vpn:vpn@localhost:5432/vpn?sslmode=disable"`
 	RedisURL    string `env:"REDIS_URL" envDefault:"redis://localhost:6379"`
-	LogLevel    string `env:"LOG_LEVEL" envDefault:"info"`
-	JWTSecret   string `env:"JWT_SECRET" envDefault:"change-me-in-production"`
+
+	// Auth (panel only)
+	JWTSecret string `env:"JWT_SECRET" envDefault:"change-me-in-production"`
+
+	// OAuth (panel only)
+	GoogleClientID     string `env:"GOOGLE_CLIENT_ID" envDefault:""`
+	GoogleClientSecret string `env:"GOOGLE_CLIENT_SECRET" envDefault:""`
+	GoogleRedirectURL  string `env:"GOOGLE_REDIRECT_URL" envDefault:""`
+
+	// Telegram Login (panel only)
+	TelegramBotToken string `env:"TELEGRAM_BOT_TOKEN" envDefault:""`
+	TelegramBotName  string `env:"TELEGRAM_BOT_NAME" envDefault:""`
 
 	// Agent-specific fields
-	PanelURL string `env:"PANEL_URL" envDefault:"http://localhost:8080"`
-	NodeToken string `env:"NODE_TOKEN" envDefault:""`
+	PanelURL     string `env:"PANEL_URL" envDefault:"http://localhost:8080"`
+	NodeToken    string `env:"NODE_TOKEN" envDefault:""`
+	NodePublicIP string `env:"NODE_PUBLIC_IP" envDefault:""`
 }
 
 // Load parses environment variables into Config.

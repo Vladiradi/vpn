@@ -1,0 +1,43 @@
+# VPN Node deployment
+# Run this on every VPS that provides VPN access.
+#
+# Required environment variables in .env:
+#   PANEL_URL=https://panel.example.com
+#   NODE_TOKEN=<enroll-token-from-admin-panel>
+#   NODE_PUBLIC_IP=203.0.113.10
+
+services:
+  node-agent:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.agent
+    environment:
+      API_MODE: agent
+      PANEL_URL: ${PANEL_URL}
+      NODE_TOKEN: ${NODE_TOKEN}
+      NODE_PUBLIC_IP: ${NODE_PUBLIC_IP}
+    volumes:
+      # Agent needs Docker access to restart XRay when config changes.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Shared volume where agent writes xray config.json
+      - xray-config:/data/xray
+    restart: unless-stopped
+
+  xray:
+    image: teddysun/xray:latest
+    network_mode: host
+    volumes:
+      - xray-config:/etc/xray:ro
+    restart: unless-stopped
+    depends_on:
+      - node-agent
+
+  decoy-site:
+    image: nginx:alpine
+    network_mode: host
+    volumes:
+      - ../decoy-site:/usr/share/nginx/html:ro
+    restart: unless-stopped
+
+volumes:
+  xray-config:

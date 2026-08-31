@@ -1,0 +1,6 @@
+DROP TABLE IF EXISTS audit_log;
+DROP TABLE IF EXISTS traffic_stats;
+DROP TABLE IF EXISTS subscriptions;
+DROP TABLE IF EXISTS devices;
+DROP TABLE IF EXISTS nodes;
+DROP TABLE IF EXISTS users;

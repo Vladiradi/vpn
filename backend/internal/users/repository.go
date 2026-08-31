@@ -31,7 +31,7 @@ func (r *Repository) Create(ctx context.Context, email, passwordHash string, rol
 	`
 
 	var user User
-	err := r.pool.QueryRow(ctx, query, email, passwordHash, role, StatusActive).Scan(
+	err := r.pool.QueryRow(ctx, query, email, nullableString(passwordHash), role, StatusActive).Scan(
 		&user.ID, &user.Email, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt,
 	)
 	if err != nil {
@@ -41,29 +41,106 @@ func (r *Repository) Create(ctx context.Context, email, passwordHash string, rol
 	return &user, nil
 }
 
+// CreateOAuth creates a user from OAuth/Telegram login.
+func (r *Repository) CreateOAuth(ctx context.Context, email string, googleID *string, telegramID *int64, role Role) (*User, error) {
+	query := `
+		INSERT INTO users (email, password_hash, google_id, telegram_id, role, status)
+		VALUES ($1, NULL, $2, $3, $4, $5)
+		RETURNING id, email, google_id, telegram_id, role, status, created_at, updated_at
+	`
+
+	var user User
+	err := r.pool.QueryRow(ctx, query, email, googleID, telegramID, role, StatusActive).Scan(
+		&user.ID, &user.Email, &user.GoogleID, &user.TelegramID,
+		&user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert oauth user: %w", err)
+	}
+
+	return &user, nil
+}
+
 // GetByEmail returns a user by email address.
 func (r *Repository) GetByEmail(ctx context.Context, email string) (*User, error) {
 	query := `
-		SELECT id, email, password_hash, role, status, totp_secret, created_at, updated_at
+		SELECT id, email, password_hash, role, status, totp_secret,
+		       google_id, telegram_id, created_at, updated_at
 		FROM users
 		WHERE email = $1 AND status != $2
 	`
 
-	var user User
-	var totpSecret *string
-	err := r.pool.QueryRow(ctx, query, email, StatusDeleted).Scan(
-		&user.ID, &user.Email, &user.PasswordHash, &user.Role, &user.Status,
-		&totpSecret, &user.CreatedAt, &user.UpdatedAt,
-	)
+	user, err := r.scanUser(ctx, query, email, StatusDeleted)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrUserNotFound
 		}
-		return nil, fmt.Errorf("select user: %w", err)
+		return nil, fmt.Errorf("select user by email: %w", err)
 	}
 
-	user.TOTPSecret = totpSecret
-	return &user, nil
+	return user, nil
+}
+
+// GetByGoogleID returns a user by Google ID.
+func (r *Repository) GetByGoogleID(ctx context.Context, googleID string) (*User, error) {
+	query := `
+		SELECT id, email, password_hash, role, status, totp_secret,
+		       google_id, telegram_id, created_at, updated_at
+		FROM users
+		WHERE google_id = $1 AND status != $2
+	`
+
+	user, err := r.scanUser(ctx, query, googleID, StatusDeleted)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrUserNotFound
+		}
+		return nil, fmt.Errorf("select user by google_id: %w", err)
+	}
+
+	return user, nil
+}
+
+// GetByTelegramID returns a user by Telegram ID.
+func (r *Repository) GetByTelegramID(ctx context.Context, telegramID int64) (*User, error) {
+	query := `
+		SELECT id, email, password_hash, role, status, totp_secret,
+		       google_id, telegram_id, created_at, updated_at
+		FROM users
+		WHERE telegram_id = $1 AND status != $2
+	`
+
+	user, err := r.scanUser(ctx, query, telegramID, StatusDeleted)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrUserNotFound
+		}
+		return nil, fmt.Errorf("select user by telegram_id: %w", err)
+	}
+
+	return user, nil
+}
+
+// LinkGoogleID attaches a Google ID to an existing user.
+func (r *Repository) LinkGoogleID(ctx context.Context, userID, googleID string) error {
+	_, err := r.pool.Exec(ctx,
+		"UPDATE users SET google_id = $2, updated_at = NOW() WHERE id = $1",
+		userID, googleID)
+	if err != nil {
+		return fmt.Errorf("link google id: %w", err)
+	}
+	return nil
+}
+
+// LinkTelegramID attaches a Telegram ID to an existing user.
+func (r *Repository) LinkTelegramID(ctx context.Context, userID string, telegramID int64) error {
+	_, err := r.pool.Exec(ctx,
+		"UPDATE users SET telegram_id = $2, updated_at = NOW() WHERE id = $1",
+		userID, telegramID)
+	if err != nil {
+		return fmt.Errorf("link telegram id: %w", err)
+	}
+	return nil
 }
 
 // Exists checks if any admin user exists.
@@ -76,4 +153,28 @@ func (r *Repository) Exists(ctx context.Context, role Role) (bool, error) {
 	}
 
 	return exists, nil
+}
+
+func (r *Repository) scanUser(ctx context.Context, query string, args ...any) (*User, error) {
+	var user User
+	var passwordHash, totpSecret *string
+
+	err := r.pool.QueryRow(ctx, query, args...).Scan(
+		&user.ID, &user.Email, &passwordHash, &user.Role, &user.Status, &totpSecret,
+		&user.GoogleID, &user.TelegramID, &user.CreatedAt, &user.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	user.PasswordHash = passwordHash
+	user.TOTPSecret = totpSecret
+	return &user, nil
+}
+
+func nullableString(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }

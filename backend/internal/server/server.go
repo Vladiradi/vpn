@@ -30,7 +30,7 @@ func New(cfg *config.Config, st *storage.Storage, userRepo *users.Repository, no
 	s := &Server{
 		cfg:            cfg,
 		storage:        st,
-		authHandler:    auth.NewHandler(userRepo, tokenService),
+		authHandler:    auth.NewHandler(cfg, userRepo, tokenService),
 		nodeHandler:    nodes.NewHandler(nodeRepo),
 		agentWSHandler: agentWS,
 		authMW:         middleware.Auth(tokenService),
@@ -47,6 +47,8 @@ func (s *Server) routes() {
 	// Auth endpoints
 	s.mux.HandleFunc("/api/v1/auth/register", s.authHandler.Register)
 	s.mux.HandleFunc("/api/v1/auth/login", s.authHandler.Login)
+	s.mux.HandleFunc("/api/v1/auth/google", s.authHandler.GoogleLogin)
+	s.mux.HandleFunc("/api/v1/auth/telegram", s.authHandler.TelegramLogin)
 
 	// Agent websocket endpoint (authenticated by node token, not JWT)
 	s.mux.Handle("/api/v1/nodes/stream", s.agentWSHandler)

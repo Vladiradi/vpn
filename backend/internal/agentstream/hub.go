@@ -1,10 +1,13 @@
 package agentstream
 
 import (
+	"context"
+	"fmt"
 	"sync"
 
 	"github.com/gorilla/websocket"
 	"github.com/vpn-project/backend/internal/nodes"
+	"github.com/vpn-project/backend/internal/xray"
 )
 
 // Agent represents a connected VPN node agent.
@@ -16,8 +19,9 @@ type Agent struct {
 
 // Hub manages all connected agents.
 type Hub struct {
-	mu     sync.RWMutex
-	agents map[string]*Agent // node_id -> agent
+	mu       sync.RWMutex
+	agents   map[string]*Agent // node_id -> agent
+	nodeRepo *nodes.Repository
 }
 
 // NewHub creates a new agent hub.
@@ -25,6 +29,12 @@ func NewHub() *Hub {
 	return &Hub{
 		agents: make(map[string]*Agent),
 	}
+}
+
+// WithRepository returns a hub that can load node configuration from storage.
+func (h *Hub) WithRepository(repo *nodes.Repository) *Hub {
+	h.nodeRepo = repo
+	return h
 }
 
 // Register adds an agent to the hub.
@@ -59,8 +69,55 @@ func (h *Hub) Get(nodeID string) (*Agent, bool) {
 	return a, ok
 }
 
-// SendConfig pushes a config message to a specific agent.
+// SendConfig pushes a full XRay config message to a specific agent.
 func (h *Hub) SendConfig(nodeID string, cfg nodes.Node) bool {
+	xrayCfg, err := xray.NewConfigBuilder(toXrayNodeConfig(cfg), nil).Build()
+	if err != nil {
+		return false
+	}
+	return h.sendConfigPayload(nodeID, xrayCfg)
+}
+
+// PushConfig loads a node from storage, builds its XRay config, and sends it
+// to the connected agent. It implements nodes.ConfigPusher.
+func (h *Hub) PushConfig(ctx context.Context, nodeID string) error {
+	if h.nodeRepo == nil {
+		return fmt.Errorf("node repository not configured")
+	}
+
+	node, err := h.nodeRepo.GetByID(ctx, nodeID)
+	if err != nil {
+		return fmt.Errorf("load node: %w", err)
+	}
+
+	xrayCfg, err := xray.NewConfigBuilder(toXrayNodeConfig(*node), nil).Build()
+	if err != nil {
+		return fmt.Errorf("build xray config: %w", err)
+	}
+
+	if !h.sendConfigPayload(nodeID, xrayCfg) {
+		return fmt.Errorf("agent not connected")
+	}
+	return nil
+}
+
+func toXrayNodeConfig(n nodes.Node) xray.NodeConfig {
+	cfg := xray.NodeConfig{
+		RealityShortIDs: n.RealityShortIDs,
+	}
+	if n.RealityDest != nil {
+		cfg.RealityDest = *n.RealityDest
+	}
+	if n.RealityPrivateKey != nil {
+		cfg.RealityPrivateKey = *n.RealityPrivateKey
+	}
+	if n.DecoyHost != nil {
+		cfg.DecoyHost = *n.DecoyHost
+	}
+	return cfg
+}
+
+func (h *Hub) sendConfigPayload(nodeID string, xrayCfg map[string]any) bool {
 	h.mu.RLock()
 	a, ok := h.agents[nodeID]
 	h.mu.RUnlock()
@@ -69,11 +126,8 @@ func (h *Hub) SendConfig(nodeID string, cfg nodes.Node) bool {
 	}
 
 	payload := map[string]any{
-		"node_id":          cfg.ID,
-		"reality_dest":     cfg.RealityDest,
-		"reality_public_key": cfg.RealityPublicKey,
-		"reality_short_ids": cfg.RealityShortIDs,
-		"decoy_host":       cfg.DecoyHost,
+		"node_id":     nodeID,
+		"xray_config": xrayCfg,
 	}
 
 	select {

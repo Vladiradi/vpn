@@ -25,6 +25,7 @@ services:
 
   xray:
     image: teddysun/xray:latest
+    container_name: xray
     network_mode: host
     volumes:
       - xray-config:/etc/xray:ro

@@ -34,10 +34,10 @@ func main() {
 	nodeRepo := nodes.NewRepository(st.Postgres.Pool)
 	tokenService := auth.NewTokenService(cfg.JWTSecret)
 
-	hub := agentstream.NewHub()
+	hub := agentstream.NewHub().WithRepository(nodeRepo)
 	agentWS := agentstream.NewHandler(hub, nodeRepo)
 
-	srv := server.New(cfg, st, userRepo, nodeRepo, tokenService, agentWS)
+	srv := server.New(cfg, st, userRepo, nodeRepo, tokenService, agentWS, hub)
 
 	port := cfg.Port
 	if port == "" {

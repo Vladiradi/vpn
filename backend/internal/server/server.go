@@ -26,12 +26,12 @@ type Server struct {
 }
 
 // New creates a new Server instance with configured routes.
-func New(cfg *config.Config, st *storage.Storage, userRepo *users.Repository, nodeRepo *nodes.Repository, tokenService *auth.TokenService, agentWS *agentstream.Handler) *Server {
+func New(cfg *config.Config, st *storage.Storage, userRepo *users.Repository, nodeRepo *nodes.Repository, tokenService *auth.TokenService, agentWS *agentstream.Handler, hub *agentstream.Hub) *Server {
 	s := &Server{
 		cfg:            cfg,
 		storage:        st,
 		authHandler:    auth.NewHandler(cfg, userRepo, tokenService),
-		nodeHandler:    nodes.NewHandler(nodeRepo),
+		nodeHandler:    nodes.NewHandler(nodeRepo, hub),
 		agentWSHandler: agentWS,
 		authMW:         middleware.Auth(tokenService),
 		mux:            http.NewServeMux(),
@@ -63,6 +63,9 @@ func (s *Server) routes() {
 
 	nodeByIDHandler := s.authMW(middleware.AdminOnly(http.HandlerFunc(s.handleNodeByID)))
 	s.mux.Handle("/api/v1/nodes/{id}", nodeByIDHandler)
+
+	nodeConfigHandler := s.authMW(middleware.AdminOnly(http.HandlerFunc(s.nodeHandler.UpdateConfig)))
+	s.mux.Handle("/api/v1/nodes/{id}/config", nodeConfigHandler)
 }
 
 func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {

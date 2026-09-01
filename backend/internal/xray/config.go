@@ -3,8 +3,6 @@ package xray
 
 import (
 	"fmt"
-
-	"github.com/vpn-project/backend/internal/nodes"
 )
 
 // Client represents a VLESS client entry.
@@ -13,23 +11,31 @@ type Client struct {
 	Flow string `json:"flow,omitempty"`
 }
 
+// NodeConfig holds the XRay/REALITY parameters for a single node.
+type NodeConfig struct {
+	RealityDest       string
+	RealityPrivateKey string
+	RealityShortIDs   []string
+	DecoyHost         string
+}
+
 // ConfigBuilder builds an XRay config.json compatible map.
 type ConfigBuilder struct {
-	Node    nodes.Node
+	Node    NodeConfig
 	Clients []Client
 }
 
 // NewConfigBuilder creates a builder for the given node and clients.
-func NewConfigBuilder(node nodes.Node, clients []Client) *ConfigBuilder {
+func NewConfigBuilder(node NodeConfig, clients []Client) *ConfigBuilder {
 	return &ConfigBuilder{Node: node, Clients: clients}
 }
 
 // Build returns the complete XRay config as a map ready for JSON encoding.
 func (b *ConfigBuilder) Build() (map[string]any, error) {
-	if b.Node.RealityDest == nil || *b.Node.RealityDest == "" {
+	if b.Node.RealityDest == "" {
 		return nil, fmt.Errorf("reality dest is required")
 	}
-	if b.Node.RealityPrivateKey == nil || *b.Node.RealityPrivateKey == "" {
+	if b.Node.RealityPrivateKey == "" {
 		return nil, fmt.Errorf("reality private key is required")
 	}
 	if len(b.Node.RealityShortIDs) == 0 {
@@ -78,10 +84,10 @@ func (b *ConfigBuilder) Build() (map[string]any, error) {
 					"security": "reality",
 					"realitySettings": map[string]any{
 						"show":        false,
-						"dest":        fmt.Sprintf("%s:443", *b.Node.RealityDest),
+						"dest":        fmt.Sprintf("%s:443", b.Node.RealityDest),
 						"xver":        0,
-						"serverNames": []string{*b.Node.RealityDest},
-						"privateKey":  *b.Node.RealityPrivateKey,
+						"serverNames": []string{b.Node.RealityDest},
+						"privateKey":  b.Node.RealityPrivateKey,
 						"shortIds":    b.Node.RealityShortIDs,
 						"maxTimeDiff": 0,
 					},
@@ -107,8 +113,8 @@ func (b *ConfigBuilder) Build() (map[string]any, error) {
 }
 
 func (b *ConfigBuilder) decoyAddress() string {
-	if b.Node.DecoyHost != nil && *b.Node.DecoyHost != "" {
-		return fmt.Sprintf("%s:80", *b.Node.DecoyHost)
+	if b.Node.DecoyHost != "" {
+		return fmt.Sprintf("%s:80", b.Node.DecoyHost)
 	}
 	return "127.0.0.1:8080"
 }

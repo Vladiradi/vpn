@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -12,6 +14,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/vpn-project/backend/internal/agentstream"
 	"github.com/vpn-project/backend/internal/config"
+	"github.com/vpn-project/backend/internal/dockerctl"
 )
 
 func main() {
@@ -52,60 +55,8 @@ func connectAndServe(panelURL, token, publicIP string) {
 	signal.Notify(interrupt, os.Interrupt)
 
 	for {
-		log.Printf("connecting to panel: %s", wsURL)
-		conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-		if err != nil {
-			log.Printf("dial failed: %v, retrying in 5s", err)
-			select {
-			case <-interrupt:
-				return
-			case <-time.After(5 * time.Second):
-				continue
-			}
-		}
-
-		// Send hello message.
-		hello := agentstream.Message{
-			Type: agentstream.MessageTypeHello,
-			Payload: map[string]any{
-				"token":     token,
-				"public_ip": publicIP,
-				"version":   "0.1.0",
-			},
-		}
-		if err := conn.WriteJSON(hello); err != nil {
-			log.Printf("failed to send hello: %v", err)
-			conn.Close()
-			continue
-		}
-
-		log.Println("connected to panel")
-		done := make(chan struct{})
-
-		go readLoop(conn, done)
-
-		ticker := time.NewTicker(10 * time.Second)
-		for {
-			select {
-			case <-done:
-				ticker.Stop()
-				conn.Close()
-				break
-			case <-ticker.C:
-				if err := conn.WriteJSON(agentstream.Message{
-					Type: agentstream.MessageTypeHeartbeat,
-					Payload: map[string]any{
-						"status": "ok",
-					},
-				}); err != nil {
-					log.Printf("heartbeat failed: %v", err)
-				}
-			case <-interrupt:
-				ticker.Stop()
-				conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-				conn.Close()
-				return
-			}
+		if err := runConnection(wsURL, token, publicIP, interrupt); err != nil {
+			log.Printf("connection ended: %v", err)
 		}
 
 		log.Println("connection lost, reconnecting in 5s")
@@ -113,6 +64,54 @@ func connectAndServe(panelURL, token, publicIP string) {
 		case <-interrupt:
 			return
 		case <-time.After(5 * time.Second):
+		}
+	}
+}
+
+func runConnection(wsURL, token, publicIP string, interrupt chan os.Signal) error {
+	log.Printf("connecting to panel: %s", wsURL)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		return fmt.Errorf("dial failed: %w", err)
+	}
+	defer conn.Close()
+
+	// Send hello message.
+	hello := agentstream.Message{
+		Type: agentstream.MessageTypeHello,
+		Payload: map[string]any{
+			"token":     token,
+			"public_ip": publicIP,
+			"version":   "0.1.0",
+		},
+	}
+	if err := conn.WriteJSON(hello); err != nil {
+		return fmt.Errorf("send hello: %w", err)
+	}
+
+	log.Println("connected to panel")
+	done := make(chan struct{})
+	go readLoop(conn, done)
+
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-done:
+			return fmt.Errorf("read loop closed")
+		case <-ticker.C:
+			if err := conn.WriteJSON(agentstream.Message{
+				Type: agentstream.MessageTypeHeartbeat,
+				Payload: map[string]any{
+					"status": "ok",
+				},
+			}); err != nil {
+				return fmt.Errorf("heartbeat: %w", err)
+			}
+		case <-interrupt:
+			conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			return fmt.Errorf("interrupted")
 		}
 	}
 }
@@ -130,8 +129,11 @@ func readLoop(conn *websocket.Conn, done chan struct{}) {
 
 		switch msg.Type {
 		case agentstream.MessageTypeConfig:
-			log.Printf("received config: %v", msg.Payload)
-			// TODO: write xray config.json and restart xray container
+			if err := applyConfig(msg.Payload); err != nil {
+				log.Printf("failed to apply config: %v", err)
+			} else {
+				log.Println("xray config applied and container restarted")
+			}
 		case agentstream.MessageTypePing:
 			// No-op, ping keeps connection alive.
 		case agentstream.MessageTypeError:
@@ -141,6 +143,38 @@ func readLoop(conn *websocket.Conn, done chan struct{}) {
 			log.Printf("unknown message type: %s", msg.Type)
 		}
 	}
+}
+
+const xrayConfigPath = "/data/xray/config.json"
+
+func applyConfig(payload map[string]any) error {
+	xrayConfig, ok := payload["xray_config"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("missing xray_config in payload")
+	}
+
+	data, err := json.MarshalIndent(xrayConfig, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal xray config: %w", err)
+	}
+
+	if err := os.WriteFile(xrayConfigPath, data, 0644); err != nil {
+		return fmt.Errorf("write %s: %w", xrayConfigPath, err)
+	}
+
+	docker := dockerctl.NewClient()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	container, err := docker.FindContainerByName(ctx, []string{"/xray", "xray"})
+	if err != nil {
+		return fmt.Errorf("find xray container: %w", err)
+	}
+
+	if err := docker.RestartContainer(ctx, container.ID, 10); err != nil {
+		return fmt.Errorf("restart xray container: %w", err)
+	}
+	return nil
 }
 
 func toWebSocketURL(input string) (string, error) {

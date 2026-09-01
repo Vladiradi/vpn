@@ -257,6 +257,7 @@ GET  /api/v1/nodes                  # список нод
 POST /api/v1/nodes                  # создать ноду
 GET  /api/v1/nodes/{id}             # одна нода
 DELETE /api/v1/nodes/{id}           # удалить ноду
+PUT  /api/v1/nodes/{id}/config      # настроить REALITY/decoy и отправить конфиг агенту
 
 GET  /api/v1/users                  # пользователи
 POST /api/v1/users                  # создать пользователя
@@ -355,19 +356,21 @@ docker compose -f docker-compose.vpn.yml up -d
 - [x] node-agent подключается и держит соединение.
 - [x] Статус ноды online/offline в панели.
 
-### ⏳ Фаза 2. OAuth + Telegram auth
+### ✅ Фаза 2. OAuth + Telegram auth
 
-- [ ] Google OAuth 2.0 backend flow.
-- [ ] Telegram Login Widget verification.
-- [ ] Объединённый аккаунт по email.
-- [ ] Обновление frontend login page.
+- [x] Google OAuth 2.0 backend flow (`POST /api/v1/auth/google`).
+- [x] Telegram Login Widget verification (`POST /api/v1/auth/telegram`).
+- [x] Объединённый аккаунт по email (link Google/Telegram ID к существующему пользователю).
+- [ ] Обновление frontend login page (отложено до фронтенд-фазы).
 
-### ⏳ Фаза 3. Генерация XRay конфига
+### ✅ Фаза 3. Генерация XRay конфига
 
-- [ ] Генератор `config.json`: VLESS + REALITY + fallback на decoy.
-- [ ] Хранение REALITY ключей в `nodes`.
-- [ ] Отправка конфига агенту через WebSocket.
-- [ ] Агент пишет конфиг и перезапускает XRay.
+- [x] Генератор `config.json`: VLESS + REALITY + fallback на decoy (`internal/xray`).
+- [x] Генерация REALITY keypair и short IDs (`internal/xray`).
+- [x] Хранение REALITY ключей в `nodes`.
+- [x] Admin endpoint `PUT /api/v1/nodes/{id}/config` с автогенерацией недостающих ключей.
+- [x] Отправка полного конфига агенту через WebSocket (`agentstream.Hub.PushConfig`).
+- [x] Агент пишет `/data/xray/config.json` и перезапускает контейнер `xray` через Docker API (`internal/dockerctl`).
 
 ### ⏳ Фаза 4. Пользователи и устройства
 
@@ -444,11 +447,11 @@ vpn/
 
 ## 11. Следующий шаг
 
-Реализовать **OAuth + Telegram авторизацию**:
+Реализовать **Фазу 4: пользователи и устройства**:
 
-1. Добавить Google OAuth 2.0 flow в `internal/auth`.
-2. Добавить верификацию Telegram Login Widget.
-3. Обновить таблицу `users` для связи нескольких способов входа с одним email.
-4. Подготовить endpoints для фронтенда.
+1. CRUD пользователей админом (`POST /api/v1/users`, `GET /api/v1/users`).
+2. Пользователь создаёт устройство (`POST /api/v1/me/devices`), выбирая ноду.
+3. UUID устройства добавляется в XRay config (`internal/xray` clients).
+4. Генерация VLESS-URI для подключения.
 
-После этого — генерация XRay конфига и управление устройствами.
+После этого — подписки, QR и frontend.

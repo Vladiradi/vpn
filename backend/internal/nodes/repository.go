@@ -155,6 +155,32 @@ func (r *Repository) UpdateConfig(ctx context.Context, id string, cfg NodeConfig
 	return nil
 }
 
+// FindByCountry returns the first active node matching the country.
+// MVP: country matching is done by checking node name/country metadata.
+// In production this should use a dedicated country_code column.
+func (r *Repository) FindByCountry(ctx context.Context, countryCode string) (*Node, error) {
+	// For MVP we match by hostname prefix or assume the only node serves Germany.
+	// A dedicated node.country_code column can be added in a future migration.
+	query := `
+		SELECT id, name, hostname, ip, status, token_hash, api_token,
+		       reality_dest, reality_private_key, reality_public_key, reality_short_ids, decoy_host,
+		       last_seen_at, created_at, updated_at
+		FROM nodes
+		WHERE status = $1
+		ORDER BY created_at
+		LIMIT 1
+	`
+
+	node, err := r.scanNode(ctx, query, StatusOnline)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNodeNotFound
+		}
+		return nil, fmt.Errorf("find node by country: %w", err)
+	}
+	return node, nil
+}
+
 // UpdateStatus updates node status and last seen time.
 func (r *Repository) UpdateStatus(ctx context.Context, id string, status Status) error {
 	_, err := r.pool.Exec(ctx,

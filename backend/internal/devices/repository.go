@@ -31,7 +31,7 @@ func (r *Repository) Create(ctx context.Context, userID, name, protocol string, 
 	`
 
 	var device Device
-	var rawNodeID *string
+	var rawNodeID, rawSubID *string
 	err := r.pool.QueryRow(ctx, query, userID, name, protocol, nodeID).Scan(
 		&device.ID, &device.UserID, &device.Name, &device.UUID,
 		&device.Protocol, &rawNodeID, &device.CreatedAt, &device.RevokedAt,
@@ -40,13 +40,14 @@ func (r *Repository) Create(ctx context.Context, userID, name, protocol string, 
 		return nil, fmt.Errorf("insert device: %w", err)
 	}
 	device.NodeID = rawNodeID
+	device.SubscriptionID = rawSubID
 	return &device, nil
 }
 
 // GetByID returns a device by ID.
 func (r *Repository) GetByID(ctx context.Context, id string) (*Device, error) {
 	query := `
-		SELECT id, user_id, name, uuid, protocol, node_id, created_at, revoked_at
+		SELECT id, user_id, subscription_id, name, uuid, protocol, node_id, created_at, revoked_at
 		FROM devices
 		WHERE id = $1 AND revoked_at IS NULL
 	`
@@ -64,7 +65,7 @@ func (r *Repository) GetByID(ctx context.Context, id string) (*Device, error) {
 // ListByUser returns all active devices for a user.
 func (r *Repository) ListByUser(ctx context.Context, userID string) ([]Device, error) {
 	query := `
-		SELECT id, user_id, name, uuid, protocol, node_id, created_at, revoked_at
+		SELECT id, user_id, subscription_id, name, uuid, protocol, node_id, created_at, revoked_at
 		FROM devices
 		WHERE user_id = $1 AND revoked_at IS NULL
 		ORDER BY created_at DESC
@@ -102,10 +103,24 @@ func (r *Repository) Revoke(ctx context.Context, id, userID string) error {
 	return nil
 }
 
+// LinkToSubscription attaches a device to a subscription.
+func (r *Repository) LinkToSubscription(ctx context.Context, deviceID, subscriptionID string) error {
+	result, err := r.pool.Exec(ctx,
+		"UPDATE devices SET subscription_id = $2, updated_at = NOW() WHERE id = $1",
+		deviceID, subscriptionID)
+	if err != nil {
+		return fmt.Errorf("link device to subscription: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrDeviceNotFound
+	}
+	return nil
+}
+
 // ListByNode returns all active devices assigned to a node.
 func (r *Repository) ListByNode(ctx context.Context, nodeID string) ([]Device, error) {
 	query := `
-		SELECT id, user_id, name, uuid, protocol, node_id, created_at, revoked_at
+		SELECT id, user_id, subscription_id, name, uuid, protocol, node_id, created_at, revoked_at
 		FROM devices
 		WHERE node_id = $1 AND revoked_at IS NULL
 		ORDER BY created_at DESC
@@ -140,14 +155,15 @@ type deviceScanner interface {
 
 func (r *Repository) scanDeviceRow(row deviceScanner) (*Device, error) {
 	var device Device
-	var nodeID *string
+	var nodeID, subID *string
 	err := row.Scan(
-		&device.ID, &device.UserID, &device.Name, &device.UUID,
+		&device.ID, &device.UserID, &subID, &device.Name, &device.UUID,
 		&device.Protocol, &nodeID, &device.CreatedAt, &device.RevokedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
 	device.NodeID = nodeID
+	device.SubscriptionID = subID
 	return &device, nil
 }

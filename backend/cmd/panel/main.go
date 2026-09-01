@@ -7,6 +7,7 @@ import (
 
 	"github.com/vpn-project/backend/internal/agentstream"
 	"github.com/vpn-project/backend/internal/auth"
+	"github.com/vpn-project/backend/internal/billing"
 	"github.com/vpn-project/backend/internal/config"
 	"github.com/vpn-project/backend/internal/devices"
 	"github.com/vpn-project/backend/internal/nodes"
@@ -34,6 +35,7 @@ func main() {
 
 	userRepo := users.NewRepository(st.Postgres.Pool)
 	offeringRepo := offerings.NewRepository(st.Postgres.Pool)
+	billingRepo := billing.NewRepository(st.Postgres.Pool)
 	nodeRepo := nodes.NewRepository(st.Postgres.Pool)
 	deviceRepo := devices.NewRepository(st.Postgres.Pool)
 	tokenService := auth.NewTokenService(cfg.JWTSecret)
@@ -41,7 +43,7 @@ func main() {
 	hub := agentstream.NewHub().WithRepository(nodeRepo).WithDevicesRepository(deviceRepo)
 	agentWS := agentstream.NewHandler(hub, nodeRepo)
 
-	srv := server.New(cfg, st, userRepo, offeringRepo, nodeRepo, deviceRepo, tokenService, agentWS, hub)
+	srv := server.New(cfg, st, userRepo, offeringRepo, billingRepo, nodeRepo, deviceRepo, tokenService, agentWS, hub)
 
 	port := cfg.Port
 	if port == "" {

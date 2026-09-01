@@ -7,6 +7,8 @@ import (
 
 	"github.com/vpn-project/backend/internal/agentstream"
 	"github.com/vpn-project/backend/internal/auth"
+	"github.com/vpn-project/backend/internal/billing"
+	"github.com/vpn-project/backend/internal/clientapps"
 	"github.com/vpn-project/backend/internal/config"
 	"github.com/vpn-project/backend/internal/devices"
 	"github.com/vpn-project/backend/internal/middleware"
@@ -24,6 +26,8 @@ type Server struct {
 	authHandler         *auth.Handler
 	userHandler         *users.Handler
 	offeringHandler     *offerings.Handler
+	billingHandler      *billing.Handler
+	clientAppsHandler   *clientapps.Handler
 	nodeHandler         *nodes.Handler
 	deviceHandler       *devices.Handler
 	subscriptionHandler *subscription.Handler
@@ -33,13 +37,15 @@ type Server struct {
 }
 
 // New creates a new Server instance with configured routes.
-func New(cfg *config.Config, st *storage.Storage, userRepo *users.Repository, offeringRepo *offerings.Repository, nodeRepo *nodes.Repository, deviceRepo *devices.Repository, tokenService *auth.TokenService, agentWS *agentstream.Handler, hub *agentstream.Hub) *Server {
+func New(cfg *config.Config, st *storage.Storage, userRepo *users.Repository, offeringRepo *offerings.Repository, billingRepo *billing.Repository, nodeRepo *nodes.Repository, deviceRepo *devices.Repository, tokenService *auth.TokenService, agentWS *agentstream.Handler, hub *agentstream.Hub) *Server {
 	s := &Server{
 		cfg:                 cfg,
 		storage:             st,
 		authHandler:         auth.NewHandler(cfg, userRepo, tokenService),
 		userHandler:         users.NewHandler(userRepo, passwordHasher{}),
 		offeringHandler:     offerings.NewHandler(offeringRepo),
+		billingHandler:      billing.NewHandler(billingRepo, offeringRepo, deviceRepo, nodeRepo, hub),
+		clientAppsHandler:   clientapps.NewHandler(),
 		nodeHandler:         nodes.NewHandler(nodeRepo, hub),
 		deviceHandler:       devices.NewHandler(deviceRepo, nodeRepo, hub),
 		subscriptionHandler: subscription.NewHandler(deviceRepo, nodeRepo),
@@ -116,6 +122,26 @@ func (s *Server) routes() {
 
 	// Public active plans list (no auth required)
 	s.mux.HandleFunc("/api/v1/public/offerings", s.offeringHandler.List)
+
+	// Subscriptions (user)
+	mySubscriptionsHandler := s.authMW(http.HandlerFunc(s.handleMySubscriptions))
+	s.mux.Handle("/api/v1/subscriptions", mySubscriptionsHandler)
+
+	mySubscriptionByIDHandler := s.authMW(http.HandlerFunc(s.handleSubscriptionByID))
+	s.mux.Handle("/api/v1/subscriptions/{id}", mySubscriptionByIDHandler)
+
+	paySubscriptionHandler := s.authMW(http.HandlerFunc(s.billingHandler.Pay))
+	s.mux.Handle("/api/v1/subscriptions/{id}/pay", paySubscriptionHandler)
+
+	// Subscriptions (admin)
+	allSubscriptionsHandler := s.authMW(middleware.AdminOnly(http.HandlerFunc(s.billingHandler.ListAll)))
+	s.mux.Handle("/api/v1/admin/subscriptions", allSubscriptionsHandler)
+
+	adminActivateSubscriptionHandler := s.authMW(middleware.AdminOnly(http.HandlerFunc(s.billingHandler.AdminActivate)))
+	s.mux.Handle("/api/v1/admin/subscriptions/{id}/activate", adminActivateSubscriptionHandler)
+
+	// Client apps (public)
+	s.mux.HandleFunc("/api/v1/client-apps", s.clientAppsHandler.List)
 }
 
 func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
@@ -205,6 +231,25 @@ func (s *Server) handleOfferingByID(w http.ResponseWriter, r *http.Request) {
 	default:
 		respondError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+func (s *Server) handleMySubscriptions(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.billingHandler.ListForMe(w, r)
+	case http.MethodPost:
+		s.billingHandler.Create(w, r)
+	default:
+		respondError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (s *Server) handleSubscriptionByID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		respondError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	s.billingHandler.Get(w, r)
 }
 
 func (s *Server) handleMyDevices(w http.ResponseWriter, r *http.Request) {

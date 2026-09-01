@@ -1,4 +1,4 @@
->package billing
+package billing
 
 import "time"
 
@@ -17,8 +17,8 @@ type Subscription struct {
 
 // Status values for subscriptions.
 const (
-	StatusPending    = "pending"
-	StatusActive     = "active"
-	StatusExpired    = "expired"
-	StatusCancelled  = "cancelled"
+	StatusPending   = "pending"
+	StatusActive    = "active"
+	StatusExpired   = "expired"
+	StatusCancelled = "cancelled"
 )

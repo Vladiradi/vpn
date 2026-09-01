@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/lib/store";
 import { listSubscriptions, activateSubscription, type Subscription } from "@/lib/api";
@@ -22,10 +23,11 @@ export default function SubscriptionsPage() {
   const token = useAuthStore((s) => s.token);
   const qc = useQueryClient();
 
-  if (!token) {
-    router.push("/login");
-    return null;
-  }
+  useEffect(() => {
+    if (!token) router.push("/login");
+  }, [token, router]);
+
+  if (!token) return null;
 
   const { data, isLoading } = useQuery({
     queryKey: ["subscriptions", token],

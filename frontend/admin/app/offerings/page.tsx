@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/lib/store";
@@ -46,10 +46,11 @@ export default function OfferingsPage() {
   const [isOpen, setIsOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
 
-  if (!token) {
-    router.push("/login");
-    return null;
-  }
+  useEffect(() => {
+    if (!token) router.push("/login");
+  }, [token, router]);
+
+  if (!token) return null;
 
   const { data, isLoading } = useQuery({
     queryKey: ["offerings", token],
@@ -86,9 +87,7 @@ export default function OfferingsPage() {
           <div className="flex items-center justify-between">
             <h1 className="text-2xl font-semibold">Тарифы</h1>
             <Dialog open={isOpen} onOpenChange={setIsOpen}>
-              <DialogTrigger asChild>
-                <Button>Добавить тариф</Button>
-              </DialogTrigger>
+              <DialogTrigger render={<Button>Добавить тариф</Button>} />
               <DialogContent className="max-w-lg">
                 <DialogHeader>
                   <DialogTitle>Новый тариф</DialogTitle>

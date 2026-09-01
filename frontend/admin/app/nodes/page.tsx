@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/lib/store";
@@ -35,10 +35,11 @@ export default function NodesPage() {
   const [form, setForm] = useState({ name: "", hostname: "", public_ip: "" });
   const [enrollToken, setEnrollToken] = useState<string | null>(null);
 
-  if (!token) {
-    router.push("/login");
-    return null;
-  }
+  useEffect(() => {
+    if (!token) router.push("/login");
+  }, [token, router]);
+
+  if (!token) return null;
 
   const { data, isLoading } = useQuery({
     queryKey: ["nodes", token],
@@ -76,9 +77,7 @@ export default function NodesPage() {
           <div className="flex items-center justify-between">
             <h1 className="text-2xl font-semibold">Ноды</h1>
             <Dialog open={isOpen} onOpenChange={setIsOpen}>
-              <DialogTrigger asChild>
-                <Button>Добавить ноду</Button>
-              </DialogTrigger>
+              <DialogTrigger render={<Button>Добавить ноду</Button>} />
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>Новая нода</DialogTitle>

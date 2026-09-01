@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/lib/store";
@@ -34,10 +34,11 @@ export default function UsersPage() {
   const [isOpen, setIsOpen] = useState(false);
   const [form, setForm] = useState({ email: "", password: "", role: "user" as "admin" | "user" });
 
-  if (!token) {
-    router.push("/login");
-    return null;
-  }
+  useEffect(() => {
+    if (!token) router.push("/login");
+  }, [token, router]);
+
+  if (!token) return null;
 
   const { data, isLoading } = useQuery({
     queryKey: ["users", token],
@@ -71,9 +72,7 @@ export default function UsersPage() {
           <div className="flex items-center justify-between">
             <h1 className="text-2xl font-semibold">Пользователи</h1>
             <Dialog open={isOpen} onOpenChange={setIsOpen}>
-              <DialogTrigger asChild>
-                <Button>Добавить</Button>
-              </DialogTrigger>
+              <DialogTrigger render={<Button>Добавить</Button>} />
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>Новый пользователь</DialogTitle>

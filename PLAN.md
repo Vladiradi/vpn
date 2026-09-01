@@ -237,6 +237,7 @@ subscriptions (
   id UUID PK,
   user_id UUID FK,
   offering_id UUID FK,
+  subscription_token VARCHAR UNIQUE, -- публичный токен для /sub/{token}
   status VARCHAR,                    -- active | expired | cancelled
   started_at TIMESTAMPTZ,
   expires_at TIMESTAMPTZ,            -- null для бесконечной тестовой подписки
@@ -338,8 +339,12 @@ GET /api/v1/client-apps             # ссылки на клиентские п�
 ### Subscription public endpoint
 
 ```text
-GET /sub/{token}                    # конфиг по подписке
+GET /sub/{token}                    # конфиг по подписке (публичный, без auth)
 ```
+
+Формат ответа определяется по `User-Agent`:
+- sing-box-совместимые клиенты → `sing-box JSON` outbound.
+- Остальные → plain text `VLESS URI`.
 
 ### Agents
 
@@ -459,21 +464,36 @@ docker compose -f docker-compose.vpn.yml up -d
 - [x] User UI (`frontend/user/`): логин через Google/Telegram, выбор страны/тарифа, заглушка оплаты, личный кабинет с QR/файлом и ссылками на приложения.
 - [x] Admin UI (`frontend/admin/`): пользователи, подписки, ноды, тарифы (offerings).
 
-### ⏳ Фаза 6. Публичная подписка и i18n
+### ✅ Фаза 6. Публичная подписка и i18n
 
-- [ ] `GET /sub/{token}` с роутингом по User-Agent.
-- [ ] i18n RU/EN.
-- [ ] Инструкции по установке клиентов в UI.
+- [x] Добавить `subscription_token` в таблицу `subscriptions` и генерировать его при активации.
+- [x] `GET /sub/{token}` — публичный endpoint без авторизации, отдаёт конфиг устройства по токену подписки.
+- [x] Роутинг по User-Agent на `/sub/{token}`: sing-box JSON для sing-box-клиентов, VLESS URI plain text для остальных.
+- [x] Добавить ссылку на подписку и QR подписки в User UI (`/dashboard`).
+- [x] Расширить i18n RU/EN, добавить инструкции по установке клиентов в UI.
 
-### ⏳ Фаза 7. Обсервбилити и бэкапы
+### ✅ Фаза 7. Логи и CI/CD
 
-- [ ] Метрики с нод в панель (онлайн, трафик).
-- [ ] Бэкап PostgreSQL в S3.
-- [ ] GitHub Actions CI/CD.
+- [x] Логи не в PostgreSQL и не в Docker internal json-file:
+  - Отдельный контейнер `log-server` (rsyslog + logrotate) в `deploy/log-server/`.
+  - Все сервисы шлют логи по syslog в `log-server`.
+  - Логи хранятся в named volume `logs` (`/var/log/vpn/<service>.log`).
+  - Ротация `size 100M`, `rotate 10`, `compress` — ~1 GB общий лимит.
+- [x] GitHub Actions CI/CD без S3:
+  - `.github/workflows/ci.yml` — сборка и тесты backend, сборка user/admin UI.
+  - `.github/workflows/deploy.yml` — ручной деплой на VPS 1 по SSH.
+- [x] GitLab CI/CD без S3:
+  - `.gitlab-ci.yml` — stages `test`, `build`, `deploy`.
+- [ ] Метрики с нод в панель (онлайн, трафик) — по запросу.
+- [ ] Бэкап PostgreSQL — по запросу (без S3, можно локально или через scp).
 
-### ⏳ Фаза 8. Реальные платежи и лимиты
+### 🔄 Фаза 8. Реальные платежи и лимиты
 
-- [ ] Интеграция платёжной системы (Stripe, ЮKassa, CryptoBot и т.п.).
+- [x] Абстракция `payments.Provider` и stub-реализация (`backend/internal/payments/`).
+- [x] Skeleton для [platega.io](https://platega.io/en) (`backend/internal/payments/platega.go`).
+- [x] Конфигурация провайдера через env: `PAYMENT_PROVIDER`, `PLATEGA_API_KEY`, `PLATEGA_ENDPOINT`.
+- [ ] Реальные HTTP-вызовы к platega.io API (нужен API ключ и документация).
+- [ ] UI: страница оплаты с редиректом на платёжный шлюд и обработка callback/webhook.
 - [ ] Редактирование цен и описаний тарифов в админке.
 - [ ] Ограничение количества устройств на подписку.
 - [ ] Уведомления об окончании подписки.
@@ -555,16 +575,11 @@ vpn/
 
 ## 12. Следующий шаг
 
-Реализовать **фронтенд** для фазы 5:
+Фаза 7 (логи и CI/CD) выполнена. Остались по запросу:
 
-1. User UI: логин, выбор страны/срока, заглушка оплаты, личный кабинет с QR, файлом и ссылками на приложения.
-2. Admin UI: список пользователей, подписок, устройств и нод.
+1. Метрики с нод в панель (онлайн, трафик).
+2. Бэкап PostgreSQL без S3 (локально или через scp).
 
-Бэкенд уже готов:
-- `GET /api/v1/public/offerings` — страны и сроки.
-- `POST /api/v1/subscriptions` + `POST /api/v1/subscriptions/{id}/pay` — оформление и оплата-заглушка.
-- `GET /api/v1/me/devices/{id}/config|qr|file` — конфиг/QR/файл.
-- `GET /api/v1/client-apps` — ссылки на приложения.
-- `GET /api/v1/admin/subscriptions` — подписки для админа.
+Следующая большая фаза — **фаза 8**: реальные платежи, лимиты устройств, уведомления об окончании подписки.
 
-После фронтенда — публичная подписка `/sub/{token}`, i18n, обсервбилити, CI/CD, и в конце — реальные платежи.
+Если хочешь, могу сразу начать фазу 8 (платёжная заглушка заменяется на реальный провайдер) или доделать метрики/бэкап.

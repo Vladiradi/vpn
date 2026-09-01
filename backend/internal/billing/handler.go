@@ -11,6 +11,7 @@ import (
 	"github.com/vpn-project/backend/internal/middleware"
 	"github.com/vpn-project/backend/internal/nodes"
 	"github.com/vpn-project/backend/internal/offerings"
+	"github.com/vpn-project/backend/internal/payments"
 )
 
 // Handler provides HTTP handlers for subscription management.
@@ -20,6 +21,7 @@ type Handler struct {
 	deviceRepo   *devices.Repository
 	nodeRepo     *nodes.Repository
 	pusher       ConfigPusher
+	payment      payments.Provider
 }
 
 // ConfigPusher pushes an updated XRay config to a node agent.
@@ -28,13 +30,14 @@ type ConfigPusher interface {
 }
 
 // NewHandler creates a new subscription handler.
-func NewHandler(repo *Repository, offeringRepo *offerings.Repository, deviceRepo *devices.Repository, nodeRepo *nodes.Repository, pusher ConfigPusher) *Handler {
+func NewHandler(repo *Repository, offeringRepo *offerings.Repository, deviceRepo *devices.Repository, nodeRepo *nodes.Repository, pusher ConfigPusher, payment payments.Provider) *Handler {
 	return &Handler{
 		repo:         repo,
 		offeringRepo: offeringRepo,
 		deviceRepo:   deviceRepo,
 		nodeRepo:     nodeRepo,
 		pusher:       pusher,
+		payment:      payment,
 	}
 }
 
@@ -129,8 +132,24 @@ func (h *Handler) Pay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Payment stub: always succeeds.
-	activated, err := h.activateAndProvision(ctx, sub)
+	offering, err := h.offeringRepo.GetByID(ctx, sub.OfferingID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load offering")
+		return
+	}
+
+	paid, err := h.payment.VerifyPayment(ctx, sub.ID)
+	if err != nil {
+		log.Printf("verify payment error: %v", err)
+		respondError(w, http.StatusBadRequest, "payment verification failed")
+		return
+	}
+	if !paid {
+		respondError(w, http.StatusBadRequest, "payment not completed")
+		return
+	}
+
+	activated, err := h.activateAndProvision(ctx, sub, offering)
 	if err != nil {
 		log.Printf("activate subscription error: %v", err)
 		respondError(w, http.StatusInternalServerError, "failed to activate subscription")
@@ -247,7 +266,7 @@ func (h *Handler) AdminActivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	activated, err := h.activateAndProvision(ctx, sub)
+	activated, err := h.activateAndProvision(ctx, sub, offering)
 	if err != nil {
 		log.Printf("admin activate subscription error: %v", err)
 		respondError(w, http.StatusInternalServerError, "failed to activate subscription")
@@ -261,12 +280,7 @@ func (h *Handler) AdminActivate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) activateAndProvision(ctx context.Context, sub *Subscription) (*Subscription, error) {
-	offering, err := h.offeringRepo.GetByID(ctx, sub.OfferingID)
-	if err != nil {
-		return nil, err
-	}
-
+func (h *Handler) activateAndProvision(ctx context.Context, sub *Subscription, offering *offerings.Offering) (*Subscription, error) {
 	activated, err := h.repo.Activate(ctx, sub.ID, offering.DurationMonths)
 	if err != nil {
 		return nil, err

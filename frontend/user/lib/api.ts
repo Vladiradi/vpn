@@ -31,6 +31,7 @@ export interface Subscription {
   id: string;
   user_id: string;
   offering_id: string;
+  subscription_token?: string;
   status: "pending" | "active" | "expired" | "cancelled";
   started_at?: string;
   expires_at?: string;
@@ -159,6 +160,10 @@ export function getDeviceQRUrl(deviceId: string) {
 
 export function getDeviceFileUrl(deviceId: string, format: "vless" | "sing-box") {
   return `${API_BASE_URL}/api/v1/me/devices/${deviceId}/file?format=${format}`;
+}
+
+export function getSubscriptionUrl(token: string) {
+  return `${API_BASE_URL}/sub/${token}`;
 }
 
 export function listClientApps() {

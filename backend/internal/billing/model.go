@@ -7,6 +7,7 @@ type Subscription struct {
 	ID                string     `json:"id"`
 	UserID            string     `json:"user_id"`
 	OfferingID        string     `json:"offering_id"`
+	SubscriptionToken *string    `json:"subscription_token,omitempty"`
 	Status            string     `json:"status"`
 	StartedAt         *time.Time `json:"started_at,omitempty"`
 	ExpiresAt         *time.Time `json:"expires_at,omitempty"`

@@ -6,7 +6,24 @@
 #   NODE_TOKEN=<enroll-token-from-admin-panel>
 #   NODE_PUBLIC_IP=203.0.113.10
 
+x-logging: &syslog-logging
+  driver: syslog
+  options:
+    syslog-address: "udp://log-server:514"
+    tag: "{{.Name}}"
+
 services:
+  log-server:
+    build:
+      context: ./log-server
+      dockerfile: Dockerfile
+    volumes:
+      - logs:/var/log/vpn
+    ports:
+      - "127.0.0.1:514:514/udp"
+      - "127.0.0.1:514:514/tcp"
+    restart: unless-stopped
+
   node-agent:
     build:
       context: ../backend
@@ -21,6 +38,10 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # Shared volume where agent writes xray config.json
       - xray-config:/data/xray
+    logging: *syslog-logging
+    depends_on:
+      log-server:
+        condition: service_started
     restart: unless-stopped
 
   xray:
@@ -29,6 +50,7 @@ services:
     network_mode: host
     volumes:
       - xray-config:/etc/xray:ro
+    logging: *syslog-logging
     restart: unless-stopped
     depends_on:
       - node-agent
@@ -38,7 +60,9 @@ services:
     network_mode: host
     volumes:
       - ../decoy-site:/usr/share/nginx/html:ro
+    logging: *syslog-logging
     restart: unless-stopped
 
 volumes:
   xray-config:
+  logs:

@@ -2,6 +2,8 @@ package billing
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -23,17 +25,26 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
+// generateSubscriptionToken creates a random URL-safe token.
+func generateSubscriptionToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
 // Create inserts a new pending subscription.
 func (r *Repository) Create(ctx context.Context, userID, offeringID string) (*Subscription, error) {
 	query := `
 		INSERT INTO subscriptions (user_id, offering_id, status)
 		VALUES ($1, $2, $3)
-		RETURNING id, user_id, offering_id, status, started_at, expires_at, total_traffic_bytes, created_at, updated_at
+		RETURNING id, user_id, offering_id, subscription_token, status, started_at, expires_at, total_traffic_bytes, created_at, updated_at
 	`
 
 	var sub Subscription
 	err := r.pool.QueryRow(ctx, query, userID, offeringID, StatusPending).Scan(
-		&sub.ID, &sub.UserID, &sub.OfferingID, &sub.Status,
+		&sub.ID, &sub.UserID, &sub.OfferingID, &sub.SubscriptionToken, &sub.Status,
 		&sub.StartedAt, &sub.ExpiresAt, &sub.TotalTrafficBytes,
 		&sub.CreatedAt, &sub.UpdatedAt,
 	)
@@ -46,7 +57,7 @@ func (r *Repository) Create(ctx context.Context, userID, offeringID string) (*Su
 // GetByID returns a subscription by ID.
 func (r *Repository) GetByID(ctx context.Context, id string) (*Subscription, error) {
 	query := `
-		SELECT id, user_id, offering_id, status, started_at, expires_at, total_traffic_bytes, created_at, updated_at
+		SELECT id, user_id, offering_id, subscription_token, status, started_at, expires_at, total_traffic_bytes, created_at, updated_at
 		FROM subscriptions
 		WHERE id = $1
 	`
@@ -61,10 +72,28 @@ func (r *Repository) GetByID(ctx context.Context, id string) (*Subscription, err
 	return sub, nil
 }
 
+// GetByToken returns a subscription by public subscription token.
+func (r *Repository) GetByToken(ctx context.Context, token string) (*Subscription, error) {
+	query := `
+		SELECT id, user_id, offering_id, subscription_token, status, started_at, expires_at, total_traffic_bytes, created_at, updated_at
+		FROM subscriptions
+		WHERE subscription_token = $1
+	`
+
+	sub, err := r.scanSubscription(ctx, query, token)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrSubscriptionNotFound
+		}
+		return nil, fmt.Errorf("select subscription by token: %w", err)
+	}
+	return sub, nil
+}
+
 // GetActiveByUser returns the active subscription for a user, if any.
 func (r *Repository) GetActiveByUser(ctx context.Context, userID string) (*Subscription, error) {
 	query := `
-		SELECT id, user_id, offering_id, status, started_at, expires_at, total_traffic_bytes, created_at, updated_at
+		SELECT id, user_id, offering_id, subscription_token, status, started_at, expires_at, total_traffic_bytes, created_at, updated_at
 		FROM subscriptions
 		WHERE user_id = $1 AND status = $2
 		ORDER BY created_at DESC
@@ -84,7 +113,7 @@ func (r *Repository) GetActiveByUser(ctx context.Context, userID string) (*Subsc
 // List returns all subscriptions for a user, or all subscriptions if userID is empty.
 func (r *Repository) List(ctx context.Context, userID string) ([]Subscription, error) {
 	query := `
-		SELECT id, user_id, offering_id, status, started_at, expires_at, total_traffic_bytes, created_at, updated_at
+		SELECT id, user_id, offering_id, subscription_token, status, started_at, expires_at, total_traffic_bytes, created_at, updated_at
 		FROM subscriptions
 	`
 	var args []any
@@ -112,19 +141,23 @@ func (r *Repository) List(ctx context.Context, userID string) ([]Subscription, e
 	return subs, rows.Err()
 }
 
-// Activate marks a subscription as active and sets started_at/expires_at based on offering duration.
+// Activate marks a subscription as active, generates a public subscription token, and sets started_at/expires_at.
 func (r *Repository) Activate(ctx context.Context, id string, durationMonths int) (*Subscription, error) {
 	startedAt := time.Now().UTC()
 	expiresAt := startedAt.AddDate(0, durationMonths, 0)
+	token, err := generateSubscriptionToken()
+	if err != nil {
+		return nil, fmt.Errorf("generate subscription token: %w", err)
+	}
 
 	query := `
 		UPDATE subscriptions
-		SET status = $2, started_at = $3, expires_at = $4, updated_at = NOW()
-		WHERE id = $1 AND status = $5
-		RETURNING id, user_id, offering_id, status, started_at, expires_at, total_traffic_bytes, created_at, updated_at
+		SET status = $2, subscription_token = $3, started_at = $4, expires_at = $5, updated_at = NOW()
+		WHERE id = $1 AND status = $6
+		RETURNING id, user_id, offering_id, subscription_token, status, started_at, expires_at, total_traffic_bytes, created_at, updated_at
 	`
 
-	sub, err := r.scanSubscription(ctx, query, id, StatusActive, startedAt, expiresAt, StatusPending)
+	sub, err := r.scanSubscription(ctx, query, id, StatusActive, token, startedAt, expiresAt, StatusPending)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrSubscriptionNotFound
@@ -168,7 +201,7 @@ type subscriptionScanner interface {
 func (r *Repository) scanSubscriptionRow(row subscriptionScanner) (*Subscription, error) {
 	var sub Subscription
 	err := row.Scan(
-		&sub.ID, &sub.UserID, &sub.OfferingID, &sub.Status,
+		&sub.ID, &sub.UserID, &sub.OfferingID, &sub.SubscriptionToken, &sub.Status,
 		&sub.StartedAt, &sub.ExpiresAt, &sub.TotalTrafficBytes,
 		&sub.CreatedAt, &sub.UpdatedAt,
 	)

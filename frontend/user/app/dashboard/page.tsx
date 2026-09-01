@@ -1,16 +1,18 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { listMyDevices, listClientApps, listMySubscriptions, getDeviceConfig, type ClientApp } from "@/lib/api";
+import { QRCodeSVG } from "qrcode.react";
+import { listMyDevices, listClientApps, listMySubscriptions, getDeviceConfig, getSubscriptionUrl, type ClientApp } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getDeviceQRUrl, getDeviceFileUrl } from "@/lib/api";
+import { ClientInstructions } from "@/components/client-instructions";
 
 function groupApps(apps: ClientApp[]) {
   const groups: Record<string, ClientApp[]> = {};
@@ -25,6 +27,7 @@ export default function DashboardPage() {
   const { t } = useTranslation();
   const router = useRouter();
   const { token, user, clearAuth } = useAuthStore();
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!token) {
@@ -146,6 +149,45 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
 
+            {subscription?.subscription_token && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>{t("dashboard.subscriptionLink")}</CardTitle>
+                  <CardDescription>
+                    Подходит для приложений с поддержкой подписок
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex justify-center">
+                    <QRCodeSVG
+                      value={getSubscriptionUrl(subscription.subscription_token)}
+                      size={192}
+                      className="rounded-lg border"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      readOnly
+                      value={getSubscriptionUrl(subscription.subscription_token)}
+                      className="flex-1 rounded-md border bg-muted px-3 py-2 text-xs font-mono"
+                    />
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        navigator.clipboard.writeText(getSubscriptionUrl(subscription.subscription_token!));
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 2000);
+                      }}
+                    >
+                      {copied ? t("dashboard.copied") : t("dashboard.copy")}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            <ClientInstructions />
+
             <Card>
               <CardHeader>
                 <CardTitle>{t("dashboard.apps")}</CardTitle>
@@ -174,7 +216,7 @@ export default function DashboardPage() {
                               rel="noopener noreferrer"
                               className={buttonVariants({ variant: "outline", size: "sm" })}
                             >
-                              Скачать
+                              {t("dashboard.download")}
                             </a>
                           </div>
                         ))}

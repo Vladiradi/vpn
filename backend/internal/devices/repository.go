@@ -62,6 +62,25 @@ func (r *Repository) GetByID(ctx context.Context, id string) (*Device, error) {
 	return device, nil
 }
 
+// GetBySubscription returns the active device linked to a subscription.
+func (r *Repository) GetBySubscription(ctx context.Context, subscriptionID string) (*Device, error) {
+	query := `
+		SELECT id, user_id, subscription_id, name, uuid, protocol, node_id, created_at, revoked_at
+		FROM devices
+		WHERE subscription_id = $1 AND revoked_at IS NULL
+		LIMIT 1
+	`
+
+	device, err := r.scanDevice(ctx, query, subscriptionID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrDeviceNotFound
+		}
+		return nil, fmt.Errorf("select device by subscription: %w", err)
+	}
+	return device, nil
+}
+
 // ListByUser returns all active devices for a user.
 func (r *Repository) ListByUser(ctx context.Context, userID string) ([]Device, error) {
 	query := `

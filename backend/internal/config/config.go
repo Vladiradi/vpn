@@ -33,6 +33,11 @@ type Config struct {
 	PanelURL     string `env:"PANEL_URL" envDefault:"http://localhost:8080"`
 	NodeToken    string `env:"NODE_TOKEN" envDefault:""`
 	NodePublicIP string `env:"NODE_PUBLIC_IP" envDefault:""`
+
+	// Payments (panel only)
+	PaymentProvider string `env:"PAYMENT_PROVIDER" envDefault:"stub"` // "stub" or "platega"
+	PlategaAPIKey   string `env:"PLATEGA_API_KEY" envDefault:""`
+	PlategaEndpoint string `env:"PLATEGA_ENDPOINT" envDefault:"https://api.platega.io/v1"`
 }
 
 // Load parses environment variables into Config.

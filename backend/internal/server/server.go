@@ -14,6 +14,7 @@ import (
 	"github.com/vpn-project/backend/internal/middleware"
 	"github.com/vpn-project/backend/internal/nodes"
 	"github.com/vpn-project/backend/internal/offerings"
+	"github.com/vpn-project/backend/internal/payments"
 	"github.com/vpn-project/backend/internal/storage"
 	"github.com/vpn-project/backend/internal/subscription"
 	"github.com/vpn-project/backend/internal/users"
@@ -31,6 +32,7 @@ type Server struct {
 	nodeHandler         *nodes.Handler
 	deviceHandler       *devices.Handler
 	subscriptionHandler *subscription.Handler
+	publicSubHandler    *subscription.PublicHandler
 	agentWSHandler      *agentstream.Handler
 	authMW              func(http.Handler) http.Handler
 	mux                 *http.ServeMux
@@ -44,11 +46,12 @@ func New(cfg *config.Config, st *storage.Storage, userRepo *users.Repository, of
 		authHandler:         auth.NewHandler(cfg, userRepo, tokenService),
 		userHandler:         users.NewHandler(userRepo, passwordHasher{}),
 		offeringHandler:     offerings.NewHandler(offeringRepo),
-		billingHandler:      billing.NewHandler(billingRepo, offeringRepo, deviceRepo, nodeRepo, hub),
+		billingHandler:      billing.NewHandler(billingRepo, offeringRepo, deviceRepo, nodeRepo, hub, paymentsProvider(cfg)),
 		clientAppsHandler:   clientapps.NewHandler(),
 		nodeHandler:         nodes.NewHandler(nodeRepo, hub),
 		deviceHandler:       devices.NewHandler(deviceRepo, nodeRepo, hub),
 		subscriptionHandler: subscription.NewHandler(deviceRepo, nodeRepo),
+		publicSubHandler:    subscription.NewPublicHandler(billingRepo, deviceRepo, nodeRepo),
 		agentWSHandler:      agentWS,
 		authMW:              middleware.Auth(tokenService),
 		mux:                 http.NewServeMux(),
@@ -142,6 +145,9 @@ func (s *Server) routes() {
 
 	// Client apps (public)
 	s.mux.HandleFunc("/api/v1/client-apps", s.clientAppsHandler.List)
+
+	// Public subscription link
+	s.mux.Handle("/sub/{token}", s.publicSubHandler)
 }
 
 func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
@@ -295,6 +301,15 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 // Handler returns the http.Handler for the server.
 func (s *Server) Handler() http.Handler {
 	return s.mux
+}
+
+func paymentsProvider(cfg *config.Config) payments.Provider {
+	switch cfg.PaymentProvider {
+	case "platega":
+		return payments.NewPlategaProvider(cfg.PlategaAPIKey, cfg.PlategaEndpoint)
+	default:
+		return payments.NewStubProvider()
+	}
 }
 
 func respondJSON(w http.ResponseWriter, status int, payload any) {

@@ -155,11 +155,128 @@ func (r *Repository) Exists(ctx context.Context, role Role) (bool, error) {
 	return exists, nil
 }
 
+// List returns all non-deleted users ordered by creation time.
+func (r *Repository) List(ctx context.Context) ([]User, error) {
+	query := `
+		SELECT id, email, password_hash, role, status, totp_secret,
+		       google_id, telegram_id, created_at, updated_at
+		FROM users
+		WHERE status != $1
+		ORDER BY created_at DESC
+	`
+
+	rows, err := r.pool.Query(ctx, query, StatusDeleted)
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []User
+	for rows.Next() {
+		user, err := r.scanUserRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		users = append(users, *user)
+	}
+
+	return users, rows.Err()
+}
+
+// GetByID returns a user by ID.
+func (r *Repository) GetByID(ctx context.Context, id string) (*User, error) {
+	query := `
+		SELECT id, email, password_hash, role, status, totp_secret,
+		       google_id, telegram_id, created_at, updated_at
+		FROM users
+		WHERE id = $1 AND status != $2
+	`
+
+	user, err := r.scanUser(ctx, query, id, StatusDeleted)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrUserNotFound
+		}
+		return nil, fmt.Errorf("select user by id: %w", err)
+	}
+	return user, nil
+}
+
+// Update modifies email and role for an existing user.
+func (r *Repository) Update(ctx context.Context, id, email string, role Role) (*User, error) {
+	query := `
+		UPDATE users
+		SET email = $2, role = $3, updated_at = NOW()
+		WHERE id = $1 AND status != $4
+		RETURNING id, email, password_hash, role, status, totp_secret,
+		          google_id, telegram_id, created_at, updated_at
+	`
+
+	user, err := r.scanUser(ctx, query, id, email, role, StatusDeleted)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrUserNotFound
+		}
+		return nil, fmt.Errorf("update user: %w", err)
+	}
+	return user, nil
+}
+
+// SetStatus changes a user's status (active/blocked/deleted).
+func (r *Repository) SetStatus(ctx context.Context, id string, status Status) error {
+	result, err := r.pool.Exec(ctx,
+		"UPDATE users SET status = $2, updated_at = NOW() WHERE id = $1 AND status != $3",
+		id, status, StatusDeleted)
+	if err != nil {
+		return fmt.Errorf("set user status: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+// SetPassword updates the password hash for a user.
+func (r *Repository) SetPassword(ctx context.Context, id, passwordHash string) error {
+	result, err := r.pool.Exec(ctx,
+		"UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1 AND status != $3",
+		id, passwordHash, StatusDeleted)
+	if err != nil {
+		return fmt.Errorf("set password: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
 func (r *Repository) scanUser(ctx context.Context, query string, args ...any) (*User, error) {
 	var user User
 	var passwordHash, totpSecret *string
 
 	err := r.pool.QueryRow(ctx, query, args...).Scan(
+		&user.ID, &user.Email, &passwordHash, &user.Role, &user.Status, &totpSecret,
+		&user.GoogleID, &user.TelegramID, &user.CreatedAt, &user.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	user.PasswordHash = passwordHash
+	user.TOTPSecret = totpSecret
+	return &user, nil
+}
+
+// userScanner abstracts pgx.Row and pgx.Rows scanning.
+type userScanner interface {
+	Scan(dest ...any) error
+}
+
+func (r *Repository) scanUserRow(row userScanner) (*User, error) {
+	var user User
+	var passwordHash, totpSecret *string
+
+	err := row.Scan(
 		&user.ID, &user.Email, &passwordHash, &user.Role, &user.Status, &totpSecret,
 		&user.GoogleID, &user.TelegramID, &user.CreatedAt, &user.UpdatedAt,
 	)

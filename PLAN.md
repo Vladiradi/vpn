@@ -16,9 +16,31 @@
 - управляющая панель и сами VPN-ноды находятся на разных VPS;
 - на VPS с панелью не работает VPN, только admin/user UI, API и БД;
 - VPN-ноды управляются автоматически через `node-agent` в контейнере;
-- пользователи могут входить через email, Google или Telegram;
+- пользователи могут входить через Google или Telegram (email/password — только для первого админа);
+- пользователь выбирает **только страну и тариф**, ноды распределяются автоматически и скрыты от него;
 - весь стек работает в контейнерах (Docker/LXC), без установки ПО на хост;
 - публичный трафик на панель идёт через Nginx Proxy Manager.
+
+### 1.1. Пользовательский путь (MVP)
+
+1. Авторизация через Google или Telegram.
+2. Выбор **страны**: на старте две опции — **Германия** (доступна) и **Финляндия** (заглушка, недоступна).
+3. Выбор **тарифа/срока** для выбранной страны: отображается стоимость.
+4. **Заглушка оплаты** (реальная платёжная система — позже).
+5. После оплаты пользователь попадает в **личный кабинет**, где автоматически создано устройство.
+6. В личном кабинете:
+   - **QR-код** для быстрого подключения.
+   - **Файл конфигурации** (VLESS URI / sing-box JSON) для скачивания.
+   - **Ссылки на приложения** по платформам: iOS, Android, macOS, Windows, Linux.
+7. Подключение через любое совместимое приложение.
+
+> Описания тарифов, точные цены и финальные регионы будут добавлены позже. Сейчас используются заглушки для демонстрации UI/UX.
+
+### 1.2. Видимость нод
+
+- Пользователь **не видит** отдельные ноды, IP-адреса и технические детали.
+- Система автоматически назначает доступную ноду в выбранной стране.
+- На MVP доступна только одна нода — Германия, Франкфурт.
 
 ---
 
@@ -196,24 +218,43 @@ nodes (
   updated_at TIMESTAMPTZ
 )
 
-devices (
+offerings (
   id UUID PK,
-  user_id UUID FK,
-  node_id UUID FK,
-  name VARCHAR,
-  uuid UUID UNIQUE,                -- VLESS UUID
-  protocol VARCHAR,
+  name VARCHAR NOT NULL,             -- "Германия / Франкфурт / 100 Мбит/с"
+  duration_months INT NOT NULL,      -- 6, 12
+  price_rubles INT NOT NULL,         -- 500, 1000
+  speed_mbps INT NOT NULL DEFAULT 100,
+  country_code VARCHAR NOT NULL,     -- "DE", "FI"
+  country_name VARCHAR NOT NULL,     -- "Германия", "Финляндия"
+  region VARCHAR,                    -- "Франкфурт", "Хельсинки"
+  is_active BOOLEAN DEFAULT true,
+  is_available BOOLEAN DEFAULT true, -- false для заглушек
   created_at TIMESTAMPTZ,
-  revoked_at TIMESTAMPTZ
+  updated_at TIMESTAMPTZ
 )
 
 subscriptions (
   id UUID PK,
   user_id UUID FK,
-  token_hash VARCHAR UNIQUE,
-  expires_at TIMESTAMPTZ,
-  traffic_limit_bytes BIGINT,
-  created_at TIMESTAMPTZ
+  offering_id UUID FK,
+  status VARCHAR,                    -- active | expired | cancelled
+  started_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ,            -- null для бесконечной тестовой подписки
+  total_traffic_bytes BIGINT DEFAULT 0,
+  created_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ
+)
+
+devices (
+  id UUID PK,
+  user_id UUID FK,
+  subscription_id UUID FK,
+  node_id UUID FK,
+  name VARCHAR,
+  uuid UUID UNIQUE,                  -- VLESS UUID
+  protocol VARCHAR,
+  created_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ
 )
 
 traffic_stats (
@@ -251,7 +292,7 @@ POST /api/v1/auth/refresh           # обновление access token
 ### Admin
 
 ```text
-GET  /api/v1/admin/dashboard
+GET  /api/v1/admin/dashboard        # обзор: пользователи, активные подписки, трафик
 
 GET  /api/v1/nodes                  # список нод
 POST /api/v1/nodes                  # создать ноду
@@ -261,19 +302,40 @@ PUT  /api/v1/nodes/{id}/config      # настроить REALITY/decoy и отп
 
 GET  /api/v1/users                  # пользователи
 POST /api/v1/users                  # создать пользователя
-POST /api/v1/users/{id}/devices     # создать устройство
+GET  /api/v1/users/{id}             # один пользователь
+PUT  /api/v1/users/{id}             # обновить пользователя
+DELETE /api/v1/users/{id}           # удалить пользователя
+POST /api/v1/users/{id}/status      # активировать/заблокировать
+
+GET  /api/v1/offerings              # доступные предложения (фильтр по стране/доступности)
+POST /api/v1/offerings              # создать предложение (admin)
+PUT  /api/v1/offerings/{id}         # обновить предложение (admin)
+DELETE /api/v1/offerings/{id}       # удалить/деактивировать предложение (admin)
+
+GET  /api/v1/subscriptions          # все подписки (admin)
+GET  /api/v1/subscriptions/{id}     # одна подписка
+POST /api/v1/subscriptions          # оформить подписку (выбор offering, статус pending)
+POST /api/v1/subscriptions/{id}/pay # заглушка оплаты
 ```
 
 ### User
 
 ```text
-GET  /api/v1/me                     # профиль
-GET  /api/v1/me/devices             # мои устройства
-POST /api/v1/me/devices             # добавить устройство
-DELETE /api/v1/me/devices/{id}      # удалить устройство
+GET  /api/v1/me                     # профиль + активная подписка + устройство
+
+GET  /api/v1/offerings              # доступные предложения (страны + тарифы)
+
+GET  /api/v1/me/devices             # мои устройства (создаётся после оплаты)
+DELETE /api/v1/me/devices/{id}      # удалить/пересоздать устройство
+
+GET /api/v1/me/devices/{id}/config  # VLESS URI + sing-box JSON
+GET /api/v1/me/devices/{id}/qr      # PNG QR-код
+GET /api/v1/me/devices/{id}/file?format=vless|sing-box  # скачать конфиг
+
+GET /api/v1/client-apps             # ссылки на клиентские приложения по платформам
 ```
 
-### Subscriptions
+### Subscription public endpoint
 
 ```text
 GET /sub/{token}                    # конфиг по подписке
@@ -372,35 +434,49 @@ docker compose -f docker-compose.vpn.yml up -d
 - [x] Отправка полного конфига агенту через WebSocket (`agentstream.Hub.PushConfig`).
 - [x] Агент пишет `/data/xray/config.json` и перезапускает контейнер `xray` через Docker API (`internal/dockerctl`).
 
-### ⏳ Фаза 4. Пользователи и устройства
+### ✅ Фаза 4. Пользователи, устройства и доставка конфига
 
-- [ ] Админ создаёт пользователя.
-- [ ] Пользователь создаёт устройство (выбирает ноду).
-- [ ] UUID устройства добавляется в XRay.
-- [ ] Генерация VLESS-URI.
+- [x] Admin CRUD пользователей (`GET/POST /api/v1/users`, `GET/PUT/DELETE /api/v1/users/{id}`, `POST /api/v1/users/{id}/status`).
+- [x] Пользователь создаёт/удаляет своё устройство (`GET/POST/DELETE /api/v1/me/devices`), выбирая ноду.
+- [x] Admin может создать устройство для пользователя (`POST /api/v1/users/{id}/devices`).
+- [x] UUID устройства добавляется в XRay inbound clients и пушится агенту при создании/отзыве.
+- [x] Генерация VLESS-URI и sing-box JSON (`internal/subscription`).
+- [x] Доставка конфига:
+  - `GET /api/v1/me/devices/{id}/config` — VLESS URI + sing-box JSON.
+  - `GET /api/v1/me/devices/{id}/qr` — PNG QR-код для VLESS URI.
+  - `GET /api/v1/me/devices/{id}/file?format=vless|sing-box` — скачать `.txt` или `.json`.
 
-### ⏳ Фаза 5. Subscription и QR
+### ⏳ Фаза 5. Страны, тарифы-заглушки, подписки и пользовательский UI
 
-- [ ] `GET /sub/{token}` с User-Agent роутингом.
-- [ ] QR-код для конфига.
-- [ ] Список устройств в пользовательском UI.
+- [ ] Вернуть в `offerings` цену и срок; добавить флаг `is_available`.
+- [ ] Сидеры: Германия (доступна) и Финляндия (недоступна заглушка).
+- [ ] API предложений с фильтром по доступности.
+- [ ] Таблица `subscriptions` (user_id, offering_id, status, expires_at).
+- [ ] API подписок: оформление, заглушка оплаты, активация.
+- [ ] Автоматическое создание устройства после успешной оплаты.
+- [ ] Автоматическое назначение ноды по стране (MVP — только Германия).
+- [ ] User UI: выбор страны, выбор срока/цены, оплата, личный кабинет с QR/файлом.
+- [ ] API `/api/v1/client-apps` — ссылки на приложения по платформам.
+- [ ] Admin UI: пользователи, подписки, устройства, трафик.
 
-### ⏳ Фаза 6. Фронтенд
+### ⏳ Фаза 6. Публичная подписка и i18n
 
-- [ ] Admin UI: ноды, пользователи, устройства, REALITY.
-- [ ] User UI: авторизация, устройства, QR, ссылка.
+- [ ] `GET /sub/{token}` с роутингом по User-Agent.
 - [ ] i18n RU/EN.
+- [ ] Инструкции по установке клиентов в UI.
 
 ### ⏳ Фаза 7. Обсервбилити и бэкапы
 
-- [ ] Метрики с нод в панель.
+- [ ] Метрики с нод в панель (онлайн, трафик).
 - [ ] Бэкап PostgreSQL в S3.
 - [ ] GitHub Actions CI/CD.
 
-### ⏳ Фаза 8. Лимиты и платежи
+### ⏳ Фаза 8. Реальные платежи и лимиты
 
-- [ ] Ограничение количества устройств.
-- [ ] Тарифы и оплата.
+- [ ] Интеграция платёжной системы (Stripe, ЮKassa, CryptoBot и т.п.).
+- [ ] Редактирование цен и описаний тарифов в админке.
+- [ ] Ограничение количества устройств на подписку.
+- [ ] Уведомления об окончании подписки.
 
 ---
 
@@ -419,7 +495,8 @@ vpn/
 │   │   ├── users/
 │   │   ├── nodes/              # управление нодами
 │   │   ├── devices/
-│   │   ├── subscriptions/
+│   │   ├── subscription/       # VLESS URI, sing-box JSON, QR
+│   │   ├── dockerctl/          # Docker API client для агента
 │   │   ├── xray/               # генерация XRay config.json
 │   │   ├── agentstream/        # WebSocket для агентов
 │   │   ├── storage/            # PostgreSQL + Redis + миграции
@@ -445,13 +522,44 @@ vpn/
 
 ---
 
-## 11. Следующий шаг
+## 11. Рекомендуемые бесплатные клиентские приложения
 
-Реализовать **Фазу 4: пользователи и устройства**:
+Форматы, которые отдаёт панель:
 
-1. CRUD пользователей админом (`POST /api/v1/users`, `GET /api/v1/users`).
-2. Пользователь создаёт устройство (`POST /api/v1/me/devices`), выбирая ноду.
-3. UUID устройства добавляется в XRay config (`internal/xray` clients).
-4. Генерация VLESS-URI для подключения.
+- **VLESS URI** — универсальная ссылка. Поддерживается почти всеми VLESS-клиентами.
+- **sing-box JSON** — JSON-фрагмент outbound для sing-box-совместимых клиентов.
+- **QR-код** — тот же VLESS URI в виде PNG.
 
-После этого — подписки, QR и frontend.
+| Платформа | Приложение | Лицензия | Поддержка VLESS+REALITY | Удобный формат импорта |
+|-----------|------------|----------|-------------------------|------------------------|
+| iOS | **Streisand** | бесплатно | ✅ | QR, sing-box JSON, ссылка |
+| iOS | **FoXray** | бесплатно | ✅ | QR, VLESS URI, sing-box JSON |
+| Android | **v2rayNG** | бесплатно (open-source) | ✅ | QR, VLESS URI, буфер обмена |
+| Android | **NekoBox** | бесплатно (open-source) | ✅ | sing-box JSON, ссылка |
+| Android | **Hiddify** | бесплатно | ✅ | sing-box JSON, ссылка, QR |
+| Windows | **v2rayN** | бесплатно (open-source) | ✅ | QR, VLESS URI, буфер обмена |
+| Windows | **Hiddify** | бесплатно | ✅ | sing-box JSON, ссылка |
+| Windows | **NekoRay** | бесплатно (open-source, archived) | ✅ | VLESS URI |
+| macOS | **V2RayXS** | бесплатно (open-source) | ✅ | VLESS URI |
+| macOS | **V2RayU** | бесплатно (open-source) | ✅ | VLESS URI |
+| macOS | **Hiddify** | бесплатно | ✅ | sing-box JSON, ссылка |
+| Linux | **Hiddify** | бесплатно | ✅ | sing-box JSON, ссылка |
+| Linux | **NekoRay** | бесплатно (open-source, archived) | ✅ | VLESS URI |
+
+> **Примечание.** На мобильных устройствах проще всего отсканировать QR-код. На десктопе — скопировать VLESS URI или импортировать sing-box JSON. Для sing-box-совместимых приложений JSON-фрагмент из `/file?format=sing-box` вставляется в секцию `outbounds` конфига sing-box.
+
+---
+
+## 12. Следующий шаг
+
+Реализовать **Фазу 5: страны, тарифы-заглушки, подписки и пользовательский UI**:
+
+1. Вернуть в `offerings` цену и срок; добавить флаг `is_available`.
+2. Сидеры: Германия (доступна) и Финляндия (недоступна заглушка).
+3. API предложений с фильтром по доступности.
+4. Таблица `subscriptions` и API: оформление, заглушка оплаты, активация.
+5. Автоматическое создание устройства после оплаты.
+6. User UI: выбор страны → срок/цена → оплата → личный кабинет с QR, файлом и ссылками на приложения.
+7. Admin UI: пользователи, подписки, устройства, трафик.
+
+После этого — публичная подписка `/sub/{token}`, i18n, обсервбилити, CI/CD, и в конце — реальные платежи.

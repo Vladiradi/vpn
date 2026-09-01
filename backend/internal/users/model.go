@@ -21,14 +21,14 @@ const (
 
 // User represents a user account.
 type User struct {
-	ID          string    `json:"id"`
-	Email       string    `json:"email"`
-	PasswordHash *string  `json:"-"`
-	Role        Role      `json:"role"`
-	Status      Status    `json:"status"`
-	TOTPSecret  *string   `json:"-"`
-	GoogleID    *string   `json:"-"`
-	TelegramID  *int64    `json:"-"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID           string    `json:"id"`
+	Email        string    `json:"email"`
+	PasswordHash *string   `json:"-"`
+	Role         Role      `json:"role"`
+	Status       Status    `json:"status"`
+	TOTPSecret   *string   `json:"-"`
+	GoogleID     *string   `json:"-"`
+	TelegramID   *int64    `json:"-"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }

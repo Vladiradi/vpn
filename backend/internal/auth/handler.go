@@ -47,12 +47,12 @@ type GoogleLoginRequest struct {
 
 // TelegramLoginRequest represents a Telegram login request.
 type TelegramLoginRequest struct {
-	ID        int64             `json:"id"`
-	FirstName string            `json:"first_name"`
-	Username  string            `json:"username"`
-	Email     string            `json:"email"`
-	AuthDate  string            `json:"auth_date"`
-	Hash      string            `json:"hash"`
+	ID        int64  `json:"id"`
+	FirstName string `json:"first_name"`
+	Username  string `json:"username"`
+	Email     string `json:"email"`
+	AuthDate  string `json:"auth_date"`
+	Hash      string `json:"hash"`
 }
 
 // Register handles admin registration. Only the first admin can register this way.

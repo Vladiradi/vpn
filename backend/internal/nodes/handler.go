@@ -68,8 +68,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Return node with plaintext enroll token. This is the only time it's shown.
 	respondJSON(w, http.StatusCreated, map[string]any{
-		"node":         node,
-		"enroll_token": enrollToken,
+		"node":               node,
+		"enroll_token":       enrollToken,
 		"docker_run_command": "docker compose -f docker-compose.vpn.yml up -d",
 	})
 }

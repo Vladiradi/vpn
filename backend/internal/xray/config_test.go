@@ -19,16 +19,16 @@ func TestConfigBuilder_Build(t *testing.T) {
 	}
 
 	// Verify top-level keys exist.
-	for _, key := range []string{"log", "inbounds", "outbounds", "routing"} {
+	for _, key := range []string{"log", "api", "inbounds", "outbounds", "routing", "stats", "policy"} {
 		if _, ok := cfg[key]; !ok {
 			t.Errorf("missing top-level key %q", key)
 		}
 	}
 
-	// Verify inbound structure.
+	// Verify inbound structure (VLESS + API dokodemo-door).
 	inbounds, ok := cfg["inbounds"].([]map[string]any)
-	if !ok || len(inbounds) != 1 {
-		t.Fatalf("expected one inbound, got %v", cfg["inbounds"])
+	if !ok || len(inbounds) != 2 {
+		t.Fatalf("expected two inbounds, got %v", cfg["inbounds"])
 	}
 	inbound := inbounds[0]
 	if inbound["port"] != 443 {

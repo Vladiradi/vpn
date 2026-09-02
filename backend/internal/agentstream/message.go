@@ -38,3 +38,18 @@ type ConfigPayload struct {
 type HeartbeatPayload struct {
 	Status string `json:"status"`
 }
+
+// StatsPayload is sent periodically by the agent with traffic data.
+type StatsPayload struct {
+	NodeID   string         `json:"node_id"`
+	Uplink   int64          `json:"uplink"`
+	Downlink int64          `json:"downlink"`
+	Devices  []DeviceStat   `json:"devices"`
+}
+
+// DeviceStat holds per-device traffic.
+type DeviceStat struct {
+	UUID     string `json:"uuid"`
+	Uplink   int64  `json:"uplink"`
+	Downlink int64  `json:"downlink"`
+}

@@ -2,6 +2,7 @@
 package dockerctl
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -79,6 +80,68 @@ func (c *Client) FindContainerByName(ctx context.Context, names []string) (*Cont
 	}
 
 	return nil, fmt.Errorf("container not found")
+}
+
+// Exec runs a command inside a container and returns the combined stdout/stderr.
+func (c *Client) Exec(ctx context.Context, containerID string, cmd []string) (string, error) {
+	execConfig := map[string]any{
+		"AttachStdout": true,
+		"AttachStderr": true,
+		"Cmd":          cmd,
+	}
+	body, err := json.Marshal(execConfig)
+	if err != nil {
+		return "", fmt.Errorf("marshal exec config: %w", err)
+	}
+
+	createURL := fmt.Sprintf("%s/containers/%s/exec", c.baseURL, containerID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, createURL, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("create exec: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("create exec: %s: %s", resp.Status, string(b))
+	}
+
+	var execResp struct {
+		ID string `json:"Id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&execResp); err != nil {
+		return "", fmt.Errorf("decode exec response: %w", err)
+	}
+
+	startURL := fmt.Sprintf("%s/exec/%s/start", c.baseURL, execResp.ID)
+	startConfig := map[string]any{"Detach": false, "Tty": false}
+	startBody, err := json.Marshal(startConfig)
+	if err != nil {
+		return "", err
+	}
+	req2, err := http.NewRequestWithContext(ctx, http.MethodPost, startURL, bytes.NewReader(startBody))
+	if err != nil {
+		return "", err
+	}
+	req2.Header.Set("Content-Type", "application/json")
+
+	resp2, err := c.httpClient.Do(req2)
+	if err != nil {
+		return "", fmt.Errorf("start exec: %w", err)
+	}
+	defer resp2.Body.Close()
+
+	out, err := io.ReadAll(resp2.Body)
+	if err != nil {
+		return "", fmt.Errorf("read exec output: %w", err)
+	}
+	return string(out), nil
 }
 
 // RestartContainer restarts the container with the given ID.

@@ -4,7 +4,14 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/lib/store";
-import { listNodes, createNode, deleteNode, type Node } from "@/lib/api";
+import {
+  listNodes,
+  createNode,
+  deleteNode,
+  getNodeTraffic,
+  type Node,
+  type NodeTraffic,
+} from "@/lib/api";
 import { Nav } from "@/components/nav";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -27,6 +34,14 @@ import {
 } from "@/components/ui/table";
 import { toast } from "sonner";
 
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+}
+
 export default function NodesPage() {
   const router = useRouter();
   const token = useAuthStore((s) => s.token);
@@ -34,6 +49,7 @@ export default function NodesPage() {
   const [isOpen, setIsOpen] = useState(false);
   const [form, setForm] = useState({ name: "", hostname: "", public_ip: "" });
   const [enrollToken, setEnrollToken] = useState<string | null>(null);
+  const [trafficNode, setTrafficNode] = useState<Node | null>(null);
 
   useEffect(() => {
     if (!token) router.push("/login");
@@ -45,6 +61,12 @@ export default function NodesPage() {
     queryKey: ["nodes", token],
     queryFn: () => listNodes(token),
     enabled: !!token,
+  });
+
+  const trafficQuery = useQuery<NodeTraffic>({
+    queryKey: ["node-traffic", trafficNode?.id, token],
+    queryFn: () => getNodeTraffic(token, trafficNode!.id),
+    enabled: !!token && !!trafficNode,
   });
 
   const create = useMutation({
@@ -118,13 +140,14 @@ export default function NodesPage() {
                     <TableHead>IP</TableHead>
                     <TableHead>Статус</TableHead>
                     <TableHead>Public key</TableHead>
+                    <TableHead>Трафик</TableHead>
                     <TableHead>Действия</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={6}>Загрузка...</TableCell>
+                      <TableCell colSpan={7}>Загрузка...</TableCell>
                     </TableRow>
                   ) : (
                     data?.nodes.map((node) => (
@@ -135,6 +158,11 @@ export default function NodesPage() {
                         <TableCell>{node.status}</TableCell>
                         <TableCell className="font-mono text-xs max-w-[200px] truncate">
                           {node.reality_public_key || "—"}
+                        </TableCell>
+                        <TableCell>
+                          <Button variant="outline" size="sm" onClick={() => setTrafficNode(node)}>
+                            Статистика
+                          </Button>
                         </TableCell>
                         <TableCell>
                           <Button variant="destructive" size="sm" onClick={() => remove.mutate(node.id)}>
@@ -150,6 +178,81 @@ export default function NodesPage() {
           </Card>
         </div>
       </main>
+
+      <Dialog open={!!trafficNode} onOpenChange={(open) => !open && setTrafficNode(null)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Трафик: {trafficNode?.name}</DialogTitle>
+          </DialogHeader>
+          {trafficQuery.isLoading ? (
+            <div>Загрузка...</div>
+          ) : trafficQuery.error ? (
+            <div className="text-destructive">Ошибка загрузки трафика</div>
+          ) : trafficQuery.data ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-4">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">Всего</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">
+                      {formatBytes(trafficQuery.data.totals.uplink + trafficQuery.data.totals.downlink)}
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">Исходящий</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{formatBytes(trafficQuery.data.totals.uplink)}</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">Входящий</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{formatBytes(trafficQuery.data.totals.downlink)}</div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card>
+                <CardContent className="p-0 max-h-80 overflow-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Время</TableHead>
+                        <TableHead>Устройство</TableHead>
+                        <TableHead>Исходящий</TableHead>
+                        <TableHead>Входящий</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {trafficQuery.data.traffic.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={4}>Нет данных</TableCell>
+                        </TableRow>
+                      ) : (
+                        trafficQuery.data.traffic.map((stat) => (
+                          <TableRow key={stat.id}>
+                            <TableCell>{new Date(stat.ts).toLocaleString()}</TableCell>
+                            <TableCell className="font-mono text-xs">{stat.device_id}</TableCell>
+                            <TableCell>{formatBytes(stat.uplink)}</TableCell>
+                            <TableCell>{formatBytes(stat.downlink)}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

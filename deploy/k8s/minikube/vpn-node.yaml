@@ -1,0 +1,93 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: node-agent-secret
+  namespace: vpn
+type: Opaque
+stringData:
+  NODE_TOKEN: "replace-with-enroll-token-from-admin-panel"
+  PANEL_URL: "ws://panel-api.vpn.svc.cluster.local:8080"
+  NODE_PUBLIC_IP: ""
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vpn-node
+  namespace: vpn
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vpn-node
+  template:
+    metadata:
+      labels:
+        app: vpn-node
+    spec:
+      hostNetwork: true
+      containers:
+        - name: node-agent
+          image: vpn/agent:latest
+          imagePullPolicy: Never
+          env:
+            - name: API_MODE
+              value: "agent"
+            - name: KUBERNETES_MODE
+              value: "1"
+            - name: PANEL_URL
+              valueFrom:
+                secretKeyRef:
+                  name: node-agent-secret
+                  key: PANEL_URL
+            - name: NODE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: node-agent-secret
+                  key: NODE_TOKEN
+            - name: NODE_PUBLIC_IP
+              valueFrom:
+                secretKeyRef:
+                  name: node-agent-secret
+                  key: NODE_PUBLIC_IP
+          volumeMounts:
+            - name: xray-config
+              mountPath: /data/xray
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+        - name: xray
+          image: teddysun/xray:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/wrapper/wrapper.sh"]
+          ports:
+            - containerPort: 443
+              hostPort: 443
+          volumeMounts:
+            - name: xray-config
+              mountPath: /etc/xray
+            - name: wrapper
+              mountPath: /wrapper
+      volumes:
+        - name: xray-config
+          emptyDir: {}
+        - name: wrapper
+          configMap:
+            name: xray-wrapper
+            defaultMode: 0755
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vpn-node
+  namespace: vpn
+spec:
+  selector:
+    app: vpn-node
+  ports:
+    - port: 443
+      targetPort: 443
+      nodePort: 30443
+  type: NodePort

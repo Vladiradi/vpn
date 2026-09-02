@@ -97,6 +97,16 @@ func (h *Handler) create(w http.ResponseWriter, ctx context.Context, userID stri
 		}
 	}
 
+	if err := h.repo.CheckLimits(ctx, userID, req.NodeID); err != nil {
+		if errors.Is(err, ErrLimitExceeded) {
+			respondError(w, http.StatusConflict, err.Error())
+			return nil, err
+		}
+		log.Printf("check device limits error: %v", err)
+		respondError(w, http.StatusInternalServerError, "failed to check device limits")
+		return nil, err
+	}
+
 	device, err := h.repo.Create(ctx, userID, req.Name, "vless", req.NodeID)
 	if err != nil {
 		log.Printf("create device error: %v", err)

@@ -130,7 +130,7 @@
 |------|---------|
 | Контейнеризация | Docker Compose (сейчас), Kubernetes (потом) |
 | Секреты | `.env` / Docker secrets / Kubernetes secrets |
-| Бэкапы | pg_dump → S3-совместимое хранилище |
+| Бэкапы | pg_dump → named volume `/backups` на VPS 1, ротация (без S3) |
 | CI/CD | GitHub Actions |
 | Мониторинг | Prometheus + Grafana (опц.) |
 
@@ -472,7 +472,7 @@ docker compose -f docker-compose.vpn.yml up -d
 - [x] Добавить ссылку на подписку и QR подписки в User UI (`/dashboard`).
 - [x] Расширить i18n RU/EN, добавить инструкции по установке клиентов в UI.
 
-### ✅ Фаза 7. Логи и CI/CD
+### ✅ Фаза 7. Метрики, логи, бэкап и CI/CD
 
 - [x] Логи не в PostgreSQL и не в Docker internal json-file:
   - Отдельный контейнер `log-server` (rsyslog + logrotate) в `deploy/log-server/`.
@@ -484,8 +484,18 @@ docker compose -f docker-compose.vpn.yml up -d
   - `.github/workflows/deploy.yml` — ручной деплой на VPS 1 по SSH.
 - [x] GitLab CI/CD без S3:
   - `.gitlab-ci.yml` — stages `test`, `build`, `deploy`.
-- [ ] Метрики с нод в панель (онлайн, трафик) — по запросу.
-- [ ] Бэкап PostgreSQL — по запросу (без S3, можно локально или через scp).
+- [x] Метрики трафика с нод в панель:
+  - Таблица `traffic_stats`, репозиторий `internal/traffic`.
+  - `node-agent` каждые 60 сек снимает `xray api statsquery` и шлёт на панель.
+  - Admin endpoints: `GET /api/v1/admin/traffic`, `GET /api/v1/admin/nodes/{id}/traffic`.
+  - Admin UI: кнопка «Статистика» в таблице нод, totals + последние записи.
+- [x] Бэкап PostgreSQL без S3:
+  - Контейнер `backup` в `deploy/backup/`, `pg_dump | gzip` в named volume `backups`.
+  - Cron-расписание через `SCHEDULE` (по умолчанию 03:00), ротация `RETAIN_COUNT`.
+  - Восстановление вручную из `/var/lib/docker/volumes/vpn_backups/_data/vpn_*.sql.gz`.
+- [x] Минимальные манифесты для Minikube:
+  - `deploy/k8s/minikube/` — Postgres, Redis, panel-api, admin-ui, user-ui, ingress.
+  - `vpn-node.yaml` + `xray-wrapper.yaml` — VPN-нода в Kubernetes (sidecar-режим).
 
 ### 🔄 Фаза 8. Реальные платежи и лимиты
 
@@ -534,6 +544,7 @@ vpn/
 ├── deploy/
 │   ├── docker-compose.control.yml   # VPS 1: panel + DB + NPM
 │   ├── docker-compose.vpn.yml       # VPS 2+: agent + XRay + decoy
+│   ├── k8s/minikube/                # манифесты для локального Kubernetes
 │   ├── npm/                         # инструкции по настройке NPM
 │   └── helm/                        # future K8s
 ├── decoy-site/                 # маскирующий сайт
@@ -575,11 +586,13 @@ vpn/
 
 ## 12. Следующий шаг
 
-Фаза 7 (логи и CI/CD) выполнена. Остались по запросу:
+Фаза 7 выполнена полностью. Готова база для фазы 8.
 
-1. Метрики с нод в панель (онлайн, трафик).
-2. Бэкап PostgreSQL без S3 (локально или через scp).
+Варианты дальнейшей работы:
 
-Следующая большая фаза — **фаза 8**: реальные платежи, лимиты устройств, уведомления об окончании подписки.
+1. **Реальная интеграция platega.io** — HTTP-вызовы к API, callback/webhook, UI оплаты.
+2. **Лимиты устройств и уведомления** окончания подписки.
+3. **Расширение метрик** — графики в админке, online users, агрегация по времени.
+4. **Документация по восстановлению из бэкапа** и ручному запуску backup-контейнера.
 
-Если хочешь, могу сразу начать фазу 8 (платёжная заглушка заменяется на реальный провайдер) или доделать метрики/бэкап.
+Скажи, с чего начать.

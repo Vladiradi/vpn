@@ -3,11 +3,13 @@ package agentstream
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/vpn-project/backend/internal/devices"
 	"github.com/vpn-project/backend/internal/nodes"
 )
 
@@ -28,13 +30,32 @@ var upgrader = websocket.Upgrader{
 
 // Handler handles agent websocket connections.
 type Handler struct {
-	hub  *Hub
-	repo *nodes.Repository
+	hub         *Hub
+	repo        *nodes.Repository
+	deviceRepo  *devices.Repository
+	trafficRepo TrafficRepository
+	billingRepo BillingRepository
+}
+
+// TrafficRepository stores traffic statistics.
+type TrafficRepository interface {
+	Save(ctx context.Context, deviceID, nodeID string, uplink, downlink int64) error
+}
+
+// BillingRepository updates subscription traffic totals.
+type BillingRepository interface {
+	AddTraffic(ctx context.Context, id string, bytes int64) error
 }
 
 // NewHandler creates a new websocket handler.
-func NewHandler(hub *Hub, repo *nodes.Repository) *Handler {
-	return &Handler{hub: hub, repo: repo}
+func NewHandler(hub *Hub, repo *nodes.Repository, deviceRepo *devices.Repository, trafficRepo TrafficRepository, billingRepo BillingRepository) *Handler {
+	return &Handler{
+		hub:         hub,
+		repo:        repo,
+		deviceRepo:  deviceRepo,
+		trafficRepo: trafficRepo,
+		billingRepo: billingRepo,
+	}
 }
 
 // ServeHTTP upgrades the connection to websocket and handles the agent session.
@@ -123,11 +144,52 @@ func (h *Handler) readPump(agent *Agent, nodeID string) {
 				log.Printf("heartbeat status update failed: %v", err)
 			}
 		case MessageTypeStats:
-			// TODO: aggregate traffic stats
+			if err := h.handleStats(nodeID, msg.Payload); err != nil {
+				log.Printf("handle stats failed: %v", err)
+			}
 		default:
 			log.Printf("unknown message type from agent: %s", msg.Type)
 		}
 	}
+}
+
+func (h *Handler) handleStats(nodeID string, payload map[string]any) error {
+	devicesRaw, ok := payload["devices"].([]any)
+	if !ok {
+		return fmt.Errorf("invalid devices payload")
+	}
+
+	ctx := context.Background()
+	for _, d := range devicesRaw {
+		raw, err := json.Marshal(d)
+		if err != nil {
+			continue
+		}
+		var ds DeviceStat
+		if err := json.Unmarshal(raw, &ds); err != nil {
+			continue
+		}
+		if ds.UUID == "" {
+			continue
+		}
+
+		device, err := h.deviceRepo.GetByUUID(ctx, ds.UUID)
+		if err != nil {
+			continue
+		}
+
+		if err := h.trafficRepo.Save(ctx, device.ID, nodeID, ds.Uplink, ds.Downlink); err != nil {
+			log.Printf("save traffic stat failed: %v", err)
+			continue
+		}
+
+		if device.SubscriptionID != nil && h.billingRepo != nil {
+			if err := h.billingRepo.AddTraffic(ctx, *device.SubscriptionID, ds.Uplink+ds.Downlink); err != nil {
+				log.Printf("update subscription traffic failed: %v", err)
+			}
+		}
+	}
+	return nil
 }
 
 func (h *Handler) writePump(agent *Agent) {

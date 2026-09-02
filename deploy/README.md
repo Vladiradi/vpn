@@ -53,6 +53,23 @@ NODE_PUBLIC_IP=<this-vps-public-ip>
 
 VPN-нода также отправляет логи в локальный `log-server`.
 
+## Minikube (локальный Kubernetes)
+
+Манифесты в `deploy/k8s/minikube/`:
+
+```bash
+cd deploy/k8s/minikube
+kubectl apply -f namespace.yaml
+kubectl apply -f postgres.yaml
+kubectl apply -f redis.yaml
+kubectl apply -f panel-api.yaml
+kubectl apply -f admin-ui.yaml
+kubectl apply -f user-ui.yaml
+kubectl apply -f ingress.yaml
+```
+
+Подробная инструкция: `deploy/k8s/minikube/README.md`.
+
 ## CI/CD
 
 Поддерживаются GitHub Actions и GitLab CI.

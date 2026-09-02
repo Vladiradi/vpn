@@ -152,6 +152,10 @@ func (h *Handler) Pay(w http.ResponseWriter, r *http.Request) {
 	activated, err := h.activateAndProvision(ctx, sub, offering)
 	if err != nil {
 		log.Printf("activate subscription error: %v", err)
+		if errors.Is(err, devices.ErrLimitExceeded) {
+			respondError(w, http.StatusConflict, err.Error())
+			return
+		}
 		respondError(w, http.StatusInternalServerError, "failed to activate subscription")
 		return
 	}
@@ -269,6 +273,10 @@ func (h *Handler) AdminActivate(w http.ResponseWriter, r *http.Request) {
 	activated, err := h.activateAndProvision(ctx, sub, offering)
 	if err != nil {
 		log.Printf("admin activate subscription error: %v", err)
+		if errors.Is(err, devices.ErrLimitExceeded) {
+			respondError(w, http.StatusConflict, err.Error())
+			return
+		}
 		respondError(w, http.StatusInternalServerError, "failed to activate subscription")
 		return
 	}
@@ -281,13 +289,18 @@ func (h *Handler) AdminActivate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) activateAndProvision(ctx context.Context, sub *Subscription, offering *offerings.Offering) (*Subscription, error) {
-	activated, err := h.repo.Activate(ctx, sub.ID, offering.DurationMonths)
+	// Find an available node for the offering country (MVP — only Germany is available).
+	node, err := h.nodeRepo.FindByCountry(ctx, offering.CountryCode)
 	if err != nil {
 		return nil, err
 	}
 
-	// Find an available node for the offering country (MVP — only Germany is available).
-	node, err := h.nodeRepo.FindByCountry(ctx, offering.CountryCode)
+	// Enforce device/user limits before activating the subscription.
+	if err := h.deviceRepo.CheckLimits(ctx, sub.UserID, &node.ID); err != nil {
+		return nil, err
+	}
+
+	activated, err := h.repo.Activate(ctx, sub.ID, offering.DurationMonths)
 	if err != nil {
 		return nil, err
 	}

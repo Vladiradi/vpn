@@ -76,6 +76,22 @@ export interface Node {
   updated_at: string;
 }
 
+export interface TrafficStat {
+  id: string;
+  device_id: string;
+  node_id: string;
+  ts: string;
+  uplink: number;
+  downlink: number;
+}
+
+export interface NodeTraffic {
+  node_id: string;
+  traffic: TrafficStat[];
+  totals: { uplink: number; downlink: number };
+  total_mb: number;
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {},
@@ -171,6 +187,10 @@ export function deleteNode(token: string, id: string) {
   return request<{ status: string }>(`/api/v1/nodes/${id}`, {
     method: "DELETE",
   }, token);
+}
+
+export function getNodeTraffic(token: string, id: string) {
+  return request<NodeTraffic>(`/api/v1/admin/nodes/${id}/traffic?limit=50`, {}, token);
 }
 
 export function updateNodeConfig(token: string, id: string, payload: {

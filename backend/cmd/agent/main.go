@@ -15,6 +15,7 @@ import (
 	"github.com/vpn-project/backend/internal/agentstream"
 	"github.com/vpn-project/backend/internal/config"
 	"github.com/vpn-project/backend/internal/dockerctl"
+	"github.com/vpn-project/backend/internal/xray"
 )
 
 func main() {
@@ -93,14 +94,16 @@ func runConnection(wsURL, token, publicIP string, interrupt chan os.Signal) erro
 	done := make(chan struct{})
 	go readLoop(conn, done)
 
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
+	heartbeatTicker := time.NewTicker(10 * time.Second)
+	statsTicker := time.NewTicker(60 * time.Second)
+	defer heartbeatTicker.Stop()
+	defer statsTicker.Stop()
 
 	for {
 		select {
 		case <-done:
 			return fmt.Errorf("read loop closed")
-		case <-ticker.C:
+		case <-heartbeatTicker.C:
 			if err := conn.WriteJSON(agentstream.Message{
 				Type: agentstream.MessageTypeHeartbeat,
 				Payload: map[string]any{
@@ -109,11 +112,66 @@ func runConnection(wsURL, token, publicIP string, interrupt chan os.Signal) erro
 			}); err != nil {
 				return fmt.Errorf("heartbeat: %w", err)
 			}
+		case <-statsTicker.C:
+			if err := sendStats(conn); err != nil {
+				log.Printf("failed to send stats: %v", err)
+			}
 		case <-interrupt:
 			conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 			return fmt.Errorf("interrupted")
 		}
 	}
+}
+
+func sendStats(conn *websocket.Conn) error {
+	if os.Getenv("KUBERNETES_MODE") == "1" {
+		// Stats collection via Docker API is not available inside Kubernetes.
+		return nil
+	}
+
+	stats, err := collectStats()
+	if err != nil {
+		return err
+	}
+
+	uplink, downlink := xray.AggregateTraffic(stats)
+	deviceStats := make([]agentstream.DeviceStat, 0, len(stats))
+	for _, s := range stats {
+		deviceStats = append(deviceStats, agentstream.DeviceStat{
+			UUID:     s.UUID,
+			Uplink:   s.Uplink,
+			Downlink: s.Downlink,
+		})
+	}
+
+	payload := map[string]any{
+		"uplink":   uplink,
+		"downlink": downlink,
+		"devices":  deviceStats,
+	}
+
+	return conn.WriteJSON(agentstream.Message{
+		Type:    agentstream.MessageTypeStats,
+		Payload: payload,
+	})
+}
+
+func collectStats() ([]xray.TrafficStat, error) {
+	docker := dockerctl.NewClient()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	container, err := docker.FindContainerByName(ctx, []string{"/xray", "xray"})
+	if err != nil {
+		return nil, fmt.Errorf("find xray container: %w", err)
+	}
+
+	output, err := docker.Exec(ctx, container.ID, []string{"xray", "api", "statsquery", "--server=127.0.0.1:10085", "-reset", "true"})
+	if err != nil {
+		return nil, fmt.Errorf("query xray stats: %w", err)
+	}
+
+	return xray.ParseStatsResponse(output)
 }
 
 func readLoop(conn *websocket.Conn, done chan struct{}) {
@@ -160,6 +218,11 @@ func applyConfig(payload map[string]any) error {
 
 	if err := os.WriteFile(xrayConfigPath, data, 0644); err != nil {
 		return fmt.Errorf("write %s: %w", xrayConfigPath, err)
+	}
+
+	if os.Getenv("KUBERNETES_MODE") == "1" {
+		// In Kubernetes the xray sidecar reloads the config from the shared volume.
+		return nil
 	}
 
 	docker := dockerctl.NewClient()

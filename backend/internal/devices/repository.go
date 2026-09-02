@@ -62,6 +62,25 @@ func (r *Repository) GetByID(ctx context.Context, id string) (*Device, error) {
 	return device, nil
 }
 
+// GetByUUID returns a device by its VLESS UUID.
+func (r *Repository) GetByUUID(ctx context.Context, uuid string) (*Device, error) {
+	query := `
+		SELECT id, user_id, subscription_id, name, uuid, protocol, node_id, created_at, revoked_at
+		FROM devices
+		WHERE uuid = $1 AND revoked_at IS NULL
+		LIMIT 1
+	`
+
+	device, err := r.scanDevice(ctx, query, uuid)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrDeviceNotFound
+		}
+		return nil, fmt.Errorf("select device by uuid: %w", err)
+	}
+	return device, nil
+}
+
 // GetBySubscription returns the active device linked to a subscription.
 func (r *Repository) GetBySubscription(ctx context.Context, subscriptionID string) (*Device, error) {
 	query := `
@@ -134,6 +153,50 @@ func (r *Repository) LinkToSubscription(ctx context.Context, deviceID, subscript
 		return ErrDeviceNotFound
 	}
 	return nil
+}
+
+// CountActiveByUser returns the number of active devices for a user.
+func (r *Repository) CountActiveByUser(ctx context.Context, userID string) (int64, error) {
+	var count int64
+	if err := r.pool.QueryRow(ctx,
+		"SELECT COUNT(*) FROM devices WHERE user_id = $1 AND revoked_at IS NULL",
+		userID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count devices by user: %w", err)
+	}
+	return count, nil
+}
+
+// CountActiveByNode returns the number of active devices assigned to a node.
+func (r *Repository) CountActiveByNode(ctx context.Context, nodeID string) (int64, error) {
+	var count int64
+	if err := r.pool.QueryRow(ctx,
+		"SELECT COUNT(*) FROM devices WHERE node_id = $1 AND revoked_at IS NULL",
+		nodeID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count devices by node: %w", err)
+	}
+	return count, nil
+}
+
+// CountActiveUsersByNode returns the number of distinct users with active devices on a node.
+func (r *Repository) CountActiveUsersByNode(ctx context.Context, nodeID string) (int64, error) {
+	var count int64
+	if err := r.pool.QueryRow(ctx,
+		"SELECT COUNT(DISTINCT user_id) FROM devices WHERE node_id = $1 AND revoked_at IS NULL",
+		nodeID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count users by node: %w", err)
+	}
+	return count, nil
+}
+
+// UserHasDeviceOnNode reports whether the user already has an active device on the node.
+func (r *Repository) UserHasDeviceOnNode(ctx context.Context, userID, nodeID string) (bool, error) {
+	var count int64
+	if err := r.pool.QueryRow(ctx,
+		"SELECT COUNT(*) FROM devices WHERE user_id = $1 AND node_id = $2 AND revoked_at IS NULL",
+		userID, nodeID).Scan(&count); err != nil {
+		return false, fmt.Errorf("check user device on node: %w", err)
+	}
+	return count > 0, nil
 }
 
 // ListByNode returns all active devices assigned to a node.

@@ -17,6 +17,7 @@ import (
 	"github.com/vpn-project/backend/internal/payments"
 	"github.com/vpn-project/backend/internal/storage"
 	"github.com/vpn-project/backend/internal/subscription"
+	"github.com/vpn-project/backend/internal/traffic"
 	"github.com/vpn-project/backend/internal/users"
 )
 
@@ -33,13 +34,14 @@ type Server struct {
 	deviceHandler       *devices.Handler
 	subscriptionHandler *subscription.Handler
 	publicSubHandler    *subscription.PublicHandler
+	trafficHandler      *traffic.Handler
 	agentWSHandler      *agentstream.Handler
 	authMW              func(http.Handler) http.Handler
 	mux                 *http.ServeMux
 }
 
 // New creates a new Server instance with configured routes.
-func New(cfg *config.Config, st *storage.Storage, userRepo *users.Repository, offeringRepo *offerings.Repository, billingRepo *billing.Repository, nodeRepo *nodes.Repository, deviceRepo *devices.Repository, tokenService *auth.TokenService, agentWS *agentstream.Handler, hub *agentstream.Hub) *Server {
+func New(cfg *config.Config, st *storage.Storage, userRepo *users.Repository, offeringRepo *offerings.Repository, billingRepo *billing.Repository, nodeRepo *nodes.Repository, deviceRepo *devices.Repository, trafficRepo *traffic.Repository, tokenService *auth.TokenService, agentWS *agentstream.Handler, hub *agentstream.Hub) *Server {
 	s := &Server{
 		cfg:                 cfg,
 		storage:             st,
@@ -52,6 +54,7 @@ func New(cfg *config.Config, st *storage.Storage, userRepo *users.Repository, of
 		deviceHandler:       devices.NewHandler(deviceRepo, nodeRepo, hub),
 		subscriptionHandler: subscription.NewHandler(deviceRepo, nodeRepo),
 		publicSubHandler:    subscription.NewPublicHandler(billingRepo, deviceRepo, nodeRepo),
+		trafficHandler:      traffic.NewHandler(trafficRepo),
 		agentWSHandler:      agentWS,
 		authMW:              middleware.Auth(tokenService),
 		mux:                 http.NewServeMux(),
@@ -76,6 +79,9 @@ func (s *Server) routes() {
 	// Admin-only routes
 	adminDashboard := s.authMW(middleware.AdminOnly(http.HandlerFunc(s.handleAdminDashboard)))
 	s.mux.Handle("/api/v1/admin/dashboard", adminDashboard)
+
+	// Traffic stats (admin only)
+	s.trafficHandler.RegisterRoutes(s.mux, s.authMW)
 
 	// Node management (admin only)
 	nodesHandler := s.authMW(middleware.AdminOnly(http.HandlerFunc(s.handleNodes)))

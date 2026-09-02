@@ -7,6 +7,7 @@
 #   - redis:     Redis cache/sessions
 #   - npm:       Nginx Proxy Manager (public ingress + Let's Encrypt)
 #   - log-server: central syslog + logrotate (logs are NOT stored in Postgres or Docker json-file)
+#   - backup:    pg_dump to local named volume, no S3
 #
 # In production expose only Nginx Proxy Manager ports (80, 443, 81).
 # Port 8080 for panel-api is exposed only for local development/testing.
@@ -27,6 +28,27 @@ services:
     ports:
       - "127.0.0.1:514:514/udp"
       - "127.0.0.1:514:514/tcp"
+    restart: unless-stopped
+    networks:
+      - net-internal
+
+  backup:
+    build:
+      context: ./backup
+      dockerfile: Dockerfile
+    volumes:
+      - backups:/backups
+    environment:
+      PGHOST: "postgres"
+      PGUSER: "vpn"
+      PGPASSWORD: "vpn"
+      PGDATABASE: "vpn"
+      RETAIN_COUNT: "7"
+      SCHEDULE: "0 3 * * *"
+    logging: *syslog-logging
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - net-internal
@@ -112,6 +134,7 @@ volumes:
   npm_data:
   npm_letsencrypt:
   logs:
+  backups:
 
 networks:
   net-internal:

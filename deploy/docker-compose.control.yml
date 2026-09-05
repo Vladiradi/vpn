@@ -12,10 +12,13 @@
 # In production expose only Nginx Proxy Manager ports (80, 443, 81).
 # Port 8080 for panel-api is exposed only for local development/testing.
 
+# Docker logging driver works at the Docker Engine level (before the Compose
+# network is up), so it cannot resolve the "log-server" service name.
+# Use the published host port instead — log-server maps 127.0.0.1:514.
 x-logging: &syslog-logging
   driver: syslog
   options:
-    syslog-address: "udp://log-server:514"
+    syslog-address: "udp://127.0.0.1:514"
     tag: "{{.Name}}"
 
 services:

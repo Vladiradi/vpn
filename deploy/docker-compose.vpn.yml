@@ -6,10 +6,13 @@
 #   NODE_TOKEN=<enroll-token-from-admin-panel>
 #   NODE_PUBLIC_IP=203.0.113.10
 
+# Docker logging driver works at the Docker Engine level (before the Compose
+# network is up), so it cannot resolve the "log-server" service name.
+# Use the published host port instead — log-server maps 127.0.0.1:514.
 x-logging: &syslog-logging
   driver: syslog
   options:
-    syslog-address: "udp://log-server:514"
+    syslog-address: "udp://127.0.0.1:514"
     tag: "{{.Name}}"
 
 services:

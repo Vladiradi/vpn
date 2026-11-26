@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useGoogleLogin } from "@react-oauth/google";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@/lib/store";
 import { googleLogin, telegramLogin, getMe, type TelegramLoginPayload } from "@/lib/api";
+import { GoogleLoginButton } from "@/components/google-login-button";
 import { TelegramLoginButton } from "@/components/telegram-login";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -21,6 +21,7 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
 
   const botUsername = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME || "";
+  const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
 
   const handleSetAuth = async (tokens: { access_token: string; refresh_token: string; expires_in: number }) => {
     const me = await getMe(tokens.access_token);
@@ -32,22 +33,17 @@ export default function LoginPage() {
     }
   };
 
-  const google = useGoogleLogin({
-    onSuccess: async (tokenResponse) => {
-      setIsLoading(true);
-      try {
-        const tokens = await googleLogin(tokenResponse.access_token);
-        await handleSetAuth(tokens);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : t("errors.generic"));
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    onError: () => {
-      toast.error(t("errors.generic"));
-    },
-  });
+  const handleGoogleSuccess = async (accessToken: string) => {
+    setIsLoading(true);
+    try {
+      const tokens = await googleLogin(accessToken);
+      await handleSetAuth(tokens);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("errors.generic"));
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleTelegramAuth = async (user: {
     id: number;
@@ -98,14 +94,14 @@ export default function LoginPage() {
             />
           </div>
 
-          <Button
-            variant="outline"
-            className="w-full"
-            onClick={() => google()}
-            disabled={isLoading}
-          >
-            {t("login.google")}
-          </Button>
+          {googleClientId && (
+            <GoogleLoginButton
+              label={t("login.google")}
+              disabled={isLoading}
+              onSuccess={handleGoogleSuccess}
+              onError={() => toast.error(t("errors.generic"))}
+            />
+          )}
 
           {botUsername && (
             <div className="flex justify-center py-2">

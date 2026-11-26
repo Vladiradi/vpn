@@ -30,11 +30,11 @@ cd ../../../backend
 docker build -t vpn/panel:latest -f Dockerfile .
 docker build -t vpn/agent:latest -f Dockerfile.agent .
 
-# frontend
+# frontend (API URL must point at the in-cluster service)
 cd ../frontend/admin
-docker build -t vpn/admin-ui:latest .
+docker build -t vpn/admin-ui:latest --build-arg NEXT_PUBLIC_API_URL=http://panel-api.vpn.svc.cluster.local:8080 .
 cd ../user
-docker build -t vpn/user-ui:latest .
+docker build -t vpn/user-ui:latest --build-arg NEXT_PUBLIC_API_URL=http://panel-api.vpn.svc.cluster.local:8080 .
 ```
 
 ## 3. Применить манифесты

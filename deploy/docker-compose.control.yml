@@ -116,6 +116,38 @@ services:
     networks:
       - net-internal
 
+  # User UI — published on 127.0.0.1 for local checks; in production served via NPM only.
+  user-ui:
+    build:
+      context: ../frontend/user
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://panel-api:8080
+    ports:
+      - "127.0.0.1:3001:3000"
+    logging: *syslog-logging
+    depends_on:
+      - panel-api
+    restart: unless-stopped
+    networks:
+      - net-internal
+
+  # Admin UI — published on 127.0.0.1 for local checks; in production served via NPM only.
+  admin-ui:
+    build:
+      context: ../frontend/admin
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://panel-api:8080
+    ports:
+      - "127.0.0.1:3000:3000"
+    logging: *syslog-logging
+    depends_on:
+      - panel-api
+    restart: unless-stopped
+    networks:
+      - net-internal
+
   npm:
     image: jc21/nginx-proxy-manager:latest
     ports:

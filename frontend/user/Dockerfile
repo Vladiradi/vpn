@@ -6,7 +6,8 @@ COPY package*.json ./
 RUN npm ci
 
 COPY . .
-ENV NEXT_PUBLIC_API_URL=http://panel-api.vpn.svc.cluster.local:8080
+ARG NEXT_PUBLIC_API_URL=http://panel-api:8080
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 RUN npm run build
 
 FROM node:20-alpine AS runner

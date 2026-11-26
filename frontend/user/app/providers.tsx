@@ -21,6 +21,16 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
 
+  // Without a client ID the Google OAuth provider throws on init.
+  if (!googleClientId) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        {children}
+        {mounted && <Toaster position="top-center" />}
+      </QueryClientProvider>
+    );
+  }
+
   return (
     <QueryClientProvider client={queryClient}>
       <GoogleOAuthProvider clientId={googleClientId}>
